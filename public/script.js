@@ -351,35 +351,6 @@ function renderProgress() {
         <p class="text-sm text-slate-500">Niveau actuel : <span class="text-accent2 font-semibold">${score().toFixed(1)} / 10</span></p>
       </div>
 
-      <!-- Import des objectifs -->
-      <div class="mt-8 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm text-left">
-        <p class="font-display font-semibold text-slate-900">Mes objectifs</p>
-        <p class="text-xs text-slate-500 mt-1">
-          Programme actuel :
-          <span class="font-semibold ${customProgram ? 'text-accent2' : 'text-slate-600'}">
-            ${customProgram ? 'personnalise' : 'par defaut'}
-          </span>
-          · ${MISSIONS.length} jours
-        </p>
-
-        <input type="file" id="importFile" accept="application/json,.json" class="hidden" />
-        <button id="pickFileBtn" class="mt-3 w-full py-3 rounded-xl bg-gradient-to-r from-accent to-accent2 text-white font-semibold text-sm active:scale-95 transition-transform">
-          Importer un fichier JSON
-        </button>
-
-        <details class="mt-3 group">
-          <summary class="text-xs text-slate-500 cursor-pointer select-none">… ou coller le JSON</summary>
-          <textarea id="pasteJson" rows="5" placeholder='{ "missions": [ { "titre": "...", "phase": "...", "tasks": ["..."] } ] }'
-            class="mt-2 w-full text-xs font-mono p-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-700"></textarea>
-          <button id="pasteImportBtn" class="mt-2 w-full py-2 rounded-lg bg-slate-800 text-white text-sm">Importer ce texte</button>
-        </details>
-
-        <div class="mt-3 flex items-center justify-between text-xs">
-          <button id="tplBtn" class="text-slate-500 underline">Telecharger un modele</button>
-          ${customProgram ? '<button id="revertBtn" class="text-slate-500 underline">Revenir au defaut</button>' : ''}
-        </div>
-      </div>
-
       <div class="mt-8 text-center">
         <button id="resetBtn" class="text-xs text-slate-400 underline">Reinitialiser ma progression</button>
       </div>
@@ -419,23 +390,6 @@ function renderProgress() {
     try { state = await apiReset(); toast('Progression reinitialisee.'); renderAll(); }
     catch (e) { toast('Erreur reseau.'); }
   });
-
-  // --- Import des objectifs ---
-  const fileInput = document.getElementById('importFile');
-  document.getElementById('pickFileBtn').addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    const f = fileInput.files[0];
-    if (!f) return;
-    const text = await f.text();
-    fileInput.value = '';
-    importProgram(text);
-  });
-  document.getElementById('pasteImportBtn').addEventListener('click', () => {
-    importProgram(document.getElementById('pasteJson').value);
-  });
-  document.getElementById('tplBtn').addEventListener('click', downloadTemplate);
-  const revertBtn = document.getElementById('revertBtn');
-  if (revertBtn) revertBtn.addEventListener('click', revertProgram);
 }
 
 async function importProgram(text) {
@@ -452,7 +406,7 @@ async function importProgram(text) {
     customProgram = true;
     toast('Objectifs importes ! ' + prog.missions.length + ' jours.');
     renderAll();
-    renderProgress();
+    renderSettings();
   } catch (e) { toast(e.message || 'Erreur reseau.'); }
 }
 
@@ -464,8 +418,133 @@ async function revertProgram() {
     applyProgram(await apiDefaultProgram());
     toast('Programme par defaut restaure.');
     renderAll();
-    renderProgress();
+    renderSettings();
   } catch (e) { toast('Erreur reseau.'); }
+}
+
+// =========================================================================
+// ONGLET 4 : PARAMETRES (generateur IA + import)
+// =========================================================================
+const AI_PROMPT = `Tu es un coach/mentor expert capable de batir un programme d'entrainement progressif pour N'IMPORTE QUEL objectif personnel : apprendre une nouvelle competence, une langue, un instrument de musique, le code, le dessin, le sport, la cuisine, la prise de parole, une habitude... bref, tout ce que je veux apprendre ou ameliorer.
+
+Aide-moi a construire ce programme jour par jour. Je vais l'importer dans mon application de suivi d'objectifs.
+
+ETAPE 1 - INTERVIEW
+Pose-moi tes questions UNE PAR UNE (attends ma reponse avant de poser la suivante) pour bien cerner mon besoin :
+- Quel est mon objectif precis ? (ce que je veux apprendre ou atteindre)
+- Mon niveau actuel sur cet objectif (grand debutant, debutant, intermediaire, avance)
+- Le temps dont je dispose chaque jour
+- La duree du programme souhaitee (nombre de jours, ex : 30)
+- Mon contexte, mes contraintes, mes blocages ou motivations
+
+ETAPE 2 - GENERATION DU FICHIER JSON
+Quand tu as assez d'infos, genere un VRAI FICHIER telechargeable nomme "mes-objectifs.json" (pas seulement du texte dans la conversation : cree un fichier que je peux telecharger). Son contenu doit etre un JSON valide respectant EXACTEMENT ce format :
+
+{
+  "themes": { "Nom de la phase": "Titre de l'etape" },
+  "citations": ["citation motivante 1", "citation motivante 2"],
+  "missions": [
+    {
+      "titre": "Titre court de la mission du jour",
+      "phase": "Nom de la phase (doit aussi exister dans themes)",
+      "tasks": ["tache concrete 1", "tache concrete 2", "tache concrete 3"]
+    }
+  ]
+}
+
+REGLES STRICTES :
+- "missions" : un objet par jour, du plus facile au plus difficile (vraie progression vers l'objectif).
+- Le nombre de missions = le nombre de jours demande.
+- Chaque mission a 3 a 5 "tasks" : des actions concretes, mesurables, faisables dans la journee.
+- Chaque "phase" utilisee dans une mission doit etre une cle de "themes".
+- "citations" : des phrases motivantes adaptees a mon objectif.
+- Le JSON doit etre valide (guillemets droits, pas de virgule finale) et adapte a MON objectif precis.
+- Ecris tout en francais, ton motivant et bienveillant.
+- Donne-moi le fichier "mes-objectifs.json" a telecharger, puis rappelle-moi de l'importer dans l'app via l'onglet Parametres. Si tu ne peux pas creer de fichier telechargeable, alors affiche UNIQUEMENT le JSON dans un bloc de code, sans aucun autre texte, pour que je puisse l'enregistrer en .json moi-meme.`;
+
+function renderSettings() {
+  document.getElementById('view-settings').innerHTML = `
+    <div class="fade-up mt-2">
+
+      <!-- Generateur IA -->
+      <div class="bg-orange-50 rounded-2xl p-4 border border-orange-100">
+        <p class="text-xs uppercase tracking-wider text-accent2 font-bold">Generer mes objectifs avec une IA</p>
+        <h2 class="font-display text-xl font-bold mt-1 text-slate-900">Assistant de creation</h2>
+        <p class="mt-1 text-sm text-slate-600">Pour <span class="font-semibold">n'importe quel objectif</span> : apprendre une langue, un instrument, le sport, une competence...</p>
+        <ol class="mt-3 text-sm text-slate-600 space-y-1 list-decimal list-inside">
+          <li>Copie le prompt ci-dessous.</li>
+          <li>Colle-le dans une IA (ChatGPT, Claude, Gemini...).</li>
+          <li>Reponds a ses questions.</li>
+          <li>Telecharge le fichier <span class="font-mono text-accent2">mes-objectifs.json</span> qu'elle genere.</li>
+          <li>Importe ce fichier juste en dessous.</li>
+        </ol>
+        <textarea id="aiPrompt" readonly rows="12"
+          class="mt-3 w-full text-xs font-mono p-3 rounded-lg border border-orange-200 bg-white text-slate-700 leading-relaxed"></textarea>
+        <button id="copyPromptBtn" class="mt-2 w-full py-3 rounded-xl bg-gradient-to-r from-accent to-accent2 text-white font-semibold text-sm active:scale-95 transition-transform">
+          Copier le prompt
+        </button>
+      </div>
+
+      <!-- Import des objectifs -->
+      <div class="mt-6 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+        <p class="font-display font-semibold text-slate-900">Importer mes objectifs</p>
+        <p class="text-xs text-slate-500 mt-1">
+          Programme actuel :
+          <span class="font-semibold ${customProgram ? 'text-accent2' : 'text-slate-600'}">${customProgram ? 'personnalise' : 'par defaut'}</span>
+          · ${MISSIONS.length} jours
+        </p>
+
+        <input type="file" id="importFile" accept="application/json,.json" class="hidden" />
+        <button id="pickFileBtn" class="mt-3 w-full py-3 rounded-xl bg-slate-800 text-white font-semibold text-sm active:scale-95 transition-transform">
+          Importer un fichier JSON
+        </button>
+
+        <details class="mt-3 group">
+          <summary class="text-xs text-slate-500 cursor-pointer select-none">… ou coller le JSON</summary>
+          <textarea id="pasteJson" rows="5" placeholder='{ "missions": [ { "titre": "...", "phase": "...", "tasks": ["..."] } ] }'
+            class="mt-2 w-full text-xs font-mono p-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-700"></textarea>
+          <button id="pasteImportBtn" class="mt-2 w-full py-2 rounded-lg bg-slate-800 text-white text-sm">Importer ce texte</button>
+        </details>
+
+        <div class="mt-3 flex items-center justify-between text-xs">
+          <button id="tplBtn" class="text-slate-500 underline">Telecharger un modele</button>
+          ${customProgram ? '<button id="revertBtn" class="text-slate-500 underline">Revenir au defaut</button>' : ''}
+        </div>
+      </div>
+
+      <p class="mt-6 text-center text-[11px] text-slate-400">Copilote de Parole · tes objectifs, ton rythme.</p>
+    </div>
+  `;
+
+  document.getElementById('aiPrompt').value = AI_PROMPT;
+
+  document.getElementById('copyPromptBtn').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(AI_PROMPT);
+      toast('Prompt copie ! Colle-le dans ton IA.');
+    } catch (e) {
+      // repli si clipboard indisponible
+      const ta = document.getElementById('aiPrompt');
+      ta.focus(); ta.select();
+      toast('Selectionne et copie le texte (Ctrl/Cmd + C).');
+    }
+  });
+
+  const fileInput = document.getElementById('importFile');
+  document.getElementById('pickFileBtn').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files[0];
+    if (!f) return;
+    const text = await f.text();
+    fileInput.value = '';
+    importProgram(text);
+  });
+  document.getElementById('pasteImportBtn').addEventListener('click', () => {
+    importProgram(document.getElementById('pasteJson').value);
+  });
+  document.getElementById('tplBtn').addEventListener('click', downloadTemplate);
+  const revertBtn = document.getElementById('revertBtn');
+  if (revertBtn) revertBtn.addEventListener('click', revertProgram);
 }
 
 function downloadTemplate() {
@@ -489,7 +568,7 @@ function renderAll() {
 }
 function switchTab(tab) {
   currentTab = tab;
-  ['today', 'week', 'progress'].forEach((t) => {
+  ['today', 'week', 'progress', 'settings'].forEach((t) => {
     document.getElementById('view-' + t).classList.toggle('hidden', t !== tab);
   });
   document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -498,6 +577,7 @@ function switchTab(tab) {
     b.classList.toggle('text-slate-400', !active);
   });
   if (tab === 'progress') renderProgress();
+  if (tab === 'settings') renderSettings();
 }
 function toast(msg) {
   const t = document.getElementById('toast');
