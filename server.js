@@ -29,7 +29,6 @@ const path = require('path');
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 const DATA_FILE = path.join(__dirname, 'data.json');
-const PROGRAM_FILE = path.join(__dirname, 'program.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -132,16 +131,6 @@ async function handleApi(req, res, pathname) {
   // GET /api/data — Read
   if (req.method === 'GET' && pathname === '/api/data') {
     return sendJSON(res, 200, readData());
-  }
-
-  // GET /api/program — contenu du programme (missions, themes, citations)
-  if (req.method === 'GET' && pathname === '/api/program') {
-    try {
-      const raw = fs.readFileSync(PROGRAM_FILE, 'utf8');
-      return sendJSON(res, 200, JSON.parse(raw));
-    } catch (e) {
-      return sendJSON(res, 500, { error: 'program.json introuvable ou invalide.' });
-    }
   }
 
   // POST /api/progress — coche une tache

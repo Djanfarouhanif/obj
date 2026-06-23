@@ -148,8 +148,9 @@
     return r.json();
   }
   async function apiProgram() {
-    const r = await fetch(API + '/program');
-    if (!r.ok) throw new Error('GET /program');
+    // program.json est un fichier statique (servi par Netlify ou le serveur local)
+    const r = await fetch('./program.json');
+    if (!r.ok) throw new Error('GET program.json');
     return r.json();
   }
   async function apiTaskOn(date, task) {

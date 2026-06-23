@@ -1,0 +1,9 @@
+# Configuration Netlify — Copilote de Parole
+# Site statique (public/) + Netlify Function pour l'API (/api/*) + Netlify Blobs.
+
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"

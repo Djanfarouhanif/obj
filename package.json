@@ -1,13 +1,21 @@
 {
   "name": "copilote-de-parole",
   "version": "1.0.0",
-  "description": "Copilote de Parole — une mission par jour pour passer de 1/10 a 10/10 en prise de parole. Mini-serveur Node natif + API REST CRUD + data.json.",
+  "description": "Copilote de Parole — une mission par jour pour passer de 1/10 a 10/10 en prise de parole. Deploiement Netlify (Functions + Blobs), avec un serveur Node natif pour le dev local.",
   "main": "server.js",
+  "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "netlify dev"
   },
   "engines": {
-    "node": ">=14"
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
   },
   "license": "MIT"
 }
