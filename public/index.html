@@ -73,7 +73,7 @@
     <header class="px-5 pt-6 pb-3 flex items-center gap-2 border-b border-slate-100">
       <span class="text-2xl">🎤</span>
       <h1 class="font-display font-bold text-lg tracking-tight text-slate-900">Copilote de Parole</h1>
-      <span class="ml-auto text-[10px] font-semibold uppercase tracking-wider text-accent2 bg-orange-50 px-2 py-1 rounded-full">Mode SEAL</span>
+      <span id="syncStatus" class="ml-auto text-[10px] font-semibold uppercase tracking-wider text-slate-400 bg-slate-100 px-2 py-1 rounded-full">…</span>
     </header>
 
     <main id="app" class="flex-1 px-5 pb-28 overflow-y-auto no-scrollbar">
@@ -115,5 +115,13 @@
   </div>
 
   <script src="./script.js"></script>
+  <script>
+    // Service Worker : permet le fonctionnement hors-ligne (mise en cache de l'app)
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>

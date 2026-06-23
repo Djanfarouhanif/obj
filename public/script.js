@@ -31,13 +31,34 @@ function parseISO(s) { const [y, m, d] = s.split('-').map(Number); return new Da
 function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
 function daysBetween(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
 
-async function apiGet() {
-  const r = await fetch(API + '/data');
-  if (!r.ok) throw new Error('GET /data');
-  return r.json();
+// --- Couche reseau bas niveau : distingue "hors-ligne" (fetch echoue) de "erreur serveur" ---
+async function apiFetch(path, opts) {
+  let r;
+  try { r = await fetch(API + path, opts); }
+  catch (e) { const err = new Error('offline'); err.offline = true; throw err; }
+  if (!r.ok) { const err = new Error('http ' + r.status); err.status = r.status; throw err; }
+  return r.json().catch(() => ({}));
 }
+
+function apiGet() { return apiFetch('/data'); }
+function apiTaskOn(date, task) {
+  return apiFetch('/progress', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, task }) });
+}
+function apiTaskOff(date, task) { return apiFetch('/progress/' + date + '/' + task, { method: 'DELETE' }); }
+function apiComplete(date) {
+  return apiFetch('/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }) });
+}
+function apiUncomplete(date) { return apiFetch('/completions/' + date, { method: 'DELETE' }); }
+function apiReset() {
+  return apiFetch('/data', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: 2, startDate: todayISO(), completions: [], progress: {} }) });
+}
+function apiSaveProgram(obj) {
+  return apiFetch('/program', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) });
+}
+function apiDeleteProgram() { return apiFetch('/program', { method: 'DELETE' }); }
+
 async function apiDefaultProgram() {
-  // program.json : programme par defaut, fichier statique
+  // program.json : programme par defaut (fichier statique, dispo hors-ligne via le Service Worker)
   const r = await fetch('./program.json');
   if (!r.ok) throw new Error('GET program.json');
   return r.json();
@@ -45,24 +66,12 @@ async function apiDefaultProgram() {
 async function loadProgram() {
   // 1) programme personnalise (importe) ? 2) sinon, programme par defaut
   try {
-    const r = await fetch(API + '/program');
-    if (r.ok) { customProgram = true; return await r.json(); }
-  } catch (e) { /* ignore, on retombe sur le defaut */ }
+    const p = await apiFetch('/program');
+    customProgram = true;
+    return p;
+  } catch (e) { /* 404 ou hors-ligne : on retombe sur le defaut */ }
   customProgram = false;
   return apiDefaultProgram();
-}
-async function apiSaveProgram(obj) {
-  const r = await fetch(API + '/program', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(obj)
-  });
-  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Import refuse.'); }
-  return r.json();
-}
-async function apiDeleteProgram() {
-  const r = await fetch(API + '/program', { method: 'DELETE' });
-  if (!r.ok) throw new Error('DELETE /program');
-  return r.json();
 }
 
 function applyProgram(p) {
@@ -80,39 +89,103 @@ function validProgramClient(p) {
     m.tasks.every((t) => typeof t === 'string')
   );
 }
-async function apiTaskOn(date, task) {
-  const r = await fetch(API + '/progress', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ date, task })
-  });
-  if (!r.ok) throw new Error('POST /progress');
-  return r.json();
+
+// =========================================================================
+// PERSISTANCE LOCALE & SYNCHRONISATION (offline-first)
+// =========================================================================
+const LS_STATE = 'cdp.state';
+const LS_QUEUE = 'cdp.queue';
+const LS_PROGRAM = 'cdp.program';
+const LS_CUSTOM = 'cdp.custom';
+let queue = [];
+let flushing = false;
+
+function saveLocalState() { try { localStorage.setItem(LS_STATE, JSON.stringify(state)); } catch (e) {} }
+function loadLocalState() { try { const s = localStorage.getItem(LS_STATE); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
+function saveLocalProgram(p) {
+  try { localStorage.setItem(LS_PROGRAM, JSON.stringify(p)); localStorage.setItem(LS_CUSTOM, customProgram ? '1' : '0'); } catch (e) {}
 }
-async function apiTaskOff(date, task) {
-  const r = await fetch(API + '/progress/' + date + '/' + task, { method: 'DELETE' });
-  if (!r.ok) throw new Error('DELETE /progress');
-  return r.json();
+function loadLocalProgram() { try { const p = localStorage.getItem(LS_PROGRAM); return p ? JSON.parse(p) : null; } catch (e) { return null; } }
+function loadQueue() { try { const q = localStorage.getItem(LS_QUEUE); queue = q ? JSON.parse(q) : []; } catch (e) { queue = []; } }
+function saveQueue() { try { localStorage.setItem(LS_QUEUE, JSON.stringify(queue)); } catch (e) {} }
+function enqueue(op) { queue.push(op); saveQueue(); }
+
+// Mutations locales (appliquees immediatement, meme hors-ligne)
+function addTaskLocal(date, i) {
+  if (!Array.isArray(state.progress[date])) state.progress[date] = [];
+  if (!state.progress[date].includes(i)) { state.progress[date].push(i); state.progress[date].sort((a, b) => a - b); }
 }
-async function apiComplete(date) {
-  const r = await fetch(API + '/completions', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ date })
-  });
-  if (!r.ok) throw new Error('POST /completions');
-  return r.json();
+function removeTaskLocal(date, i) {
+  const a = state.progress[date] || [];
+  const idx = a.indexOf(i);
+  if (idx > -1) a.splice(idx, 1);
+  if (a.length === 0) delete state.progress[date];
 }
-async function apiUncomplete(date) {
-  const r = await fetch(API + '/completions/' + date, { method: 'DELETE' });
-  if (!r.ok) throw new Error('DELETE /completions');
-  return r.json();
+function addCompletionLocal(date) { if (!state.completions.includes(date)) { state.completions.push(date); state.completions.sort(); } }
+function removeCompletionLocal(date) { const idx = state.completions.indexOf(date); if (idx > -1) state.completions.splice(idx, 1); }
+
+// Envoie une operation au serveur
+function sendOp(op) {
+  switch (op.type) {
+    case 'taskOn': return apiTaskOn(op.date, op.task);
+    case 'taskOff': return apiTaskOff(op.date, op.task);
+    case 'complete': return apiComplete(op.date);
+    case 'uncomplete': return apiUncomplete(op.date);
+    case 'reset': return apiReset();
+    case 'putProgram': return apiSaveProgram(op.program);
+    case 'deleteProgram': return apiDeleteProgram();
+    default: return Promise.resolve();
+  }
 }
-async function apiReset() {
-  const r = await fetch(API + '/data', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ version: 2, startDate: todayISO(), completions: [], progress: {} })
-  });
-  if (!r.ok) throw new Error('PUT /data');
-  return r.json();
+
+// Vide la file d'attente puis resynchronise depuis le serveur
+async function flushQueue() {
+  if (flushing) return;
+  if (!navigator.onLine) { updateSyncBadge(); return; }
+  flushing = true;
+  updateSyncBadge();
+  try {
+    while (queue.length) {
+      const op = queue[0];
+      try {
+        await sendOp(op);
+        queue.shift(); saveQueue();
+      } catch (e) {
+        if (e.offline) break;            // toujours hors-ligne : on garde la file pour plus tard
+        queue.shift(); saveQueue();      // erreur serveur (4xx) : on abandonne cet op pour ne pas bloquer
+      }
+    }
+    if (queue.length === 0) {
+      // resync : recupere l'etat du serveur (et d'eventuels changements d'un autre appareil)
+      try {
+        const data = await apiGet();
+        state = data; saveLocalState();
+        const prog = await loadProgram();
+        applyProgram(prog); saveLocalProgram(prog);
+        renderAll();
+        if (currentTab === 'settings') renderSettings();
+      } catch (e) { /* hors-ligne : on garde l'etat local */ }
+    }
+  } finally {
+    flushing = false;
+    updateSyncBadge();
+  }
+}
+
+// Indicateur de synchronisation dans l'en-tete
+function updateSyncBadge() {
+  const el = document.getElementById('syncStatus');
+  if (!el) return;
+  if (!navigator.onLine) {
+    el.textContent = 'Hors-ligne';
+    el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-1 rounded-full';
+  } else if (queue.length > 0) {
+    el.textContent = 'Sync ⏳ ' + queue.length;
+    el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-accent2 bg-orange-50 px-2 py-1 rounded-full';
+  } else {
+    el.textContent = 'En ligne';
+    el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full';
+  }
 }
 
 // =========================================================================
@@ -248,30 +321,36 @@ function renderToday() {
     btn.addEventListener('click', () => toggleTask(Number(btn.dataset.task), m));
   });
   const undo = document.getElementById('undoBtn');
-  if (undo) undo.addEventListener('click', async () => {
-    try { state = await apiUncomplete(todayISO()); renderAll(); }
-    catch (e) { toast('Erreur reseau.'); }
+  if (undo) undo.addEventListener('click', () => {
+    const date = todayISO();
+    removeCompletionLocal(date);
+    enqueue({ type: 'uncomplete', date });
+    saveLocalState();
+    renderAll();
+    flushQueue();
   });
 }
 
-async function toggleTask(i, mission) {
+// Local-first : on applique l'action immediatement, puis on synchronise (ou on met en file si hors-ligne)
+function toggleTask(i, mission) {
   const date = todayISO();
   const wasComplete = isDayComplete();
-  try {
-    if (isTaskDone(i)) {
-      state = await apiTaskOff(date, i);
-      if (wasComplete) state = await apiUncomplete(date); // une tache decochee => journee non valide
-    } else {
-      state = await apiTaskOn(date, i);
-      if (!wasComplete && allTasksDone(mission)) {
-        state = await apiComplete(date);
-        toast('Journee accomplie ! 🎉');
-      }
+  if (isTaskDone(i)) {
+    removeTaskLocal(date, i);
+    enqueue({ type: 'taskOff', date, task: i });
+    if (wasComplete) { removeCompletionLocal(date); enqueue({ type: 'uncomplete', date }); }
+  } else {
+    addTaskLocal(date, i);
+    enqueue({ type: 'taskOn', date, task: i });
+    if (!wasComplete && allTasksDone(mission)) {
+      addCompletionLocal(date);
+      enqueue({ type: 'complete', date });
+      toast('Journee accomplie ! 🎉');
     }
-    renderAll();
-  } catch (e) {
-    toast('Erreur reseau, reessaie.');
   }
+  saveLocalState();
+  renderAll();
+  flushQueue();
 }
 
 // =========================================================================
@@ -385,10 +464,14 @@ function renderProgress() {
     }
   });
 
-  document.getElementById('resetBtn').addEventListener('click', async () => {
+  document.getElementById('resetBtn').addEventListener('click', () => {
     if (!confirm('Reinitialiser toute ta progression ? Cette action est irreversible.')) return;
-    try { state = await apiReset(); toast('Progression reinitialisee.'); renderAll(); }
-    catch (e) { toast('Erreur reseau.'); }
+    state = { version: 2, startDate: todayISO(), completions: [], progress: {} };
+    saveLocalState();
+    enqueue({ type: 'reset' });
+    toast('Progression reinitialisee.');
+    renderAll();
+    flushQueue();
   });
 }
 
@@ -400,25 +483,29 @@ async function importProgram(text) {
     toast('Format invalide : il faut "missions": [{ titre, tasks: [...] }].');
     return;
   }
-  try {
-    const prog = await apiSaveProgram(obj);
-    applyProgram(prog);
-    customProgram = true;
-    toast('Objectifs importes ! ' + prog.missions.length + ' jours.');
-    renderAll();
-    renderSettings();
-  } catch (e) { toast(e.message || 'Erreur reseau.'); }
+  // Local-first : on applique tout de suite, puis on synchronise
+  customProgram = true;
+  applyProgram(obj);
+  saveLocalProgram(obj);
+  enqueue({ type: 'putProgram', program: obj });
+  toast('Objectifs importes ! ' + obj.missions.length + ' jours.');
+  renderAll();
+  renderSettings();
+  flushQueue();
 }
 
 async function revertProgram() {
   if (!confirm('Revenir au programme par defaut ? Ton programme importe sera supprime (ta progression est conservee).')) return;
   try {
-    await apiDeleteProgram();
     customProgram = false;
-    applyProgram(await apiDefaultProgram());
+    const def = await apiDefaultProgram(); // dispo hors-ligne via le Service Worker
+    applyProgram(def);
+    saveLocalProgram(def);
+    enqueue({ type: 'deleteProgram' });
     toast('Programme par defaut restaure.');
     renderAll();
     renderSettings();
+    flushQueue();
   } catch (e) { toast('Erreur reseau.'); }
 }
 
@@ -603,17 +690,40 @@ async function init() {
   document.querySelectorAll('.tab-btn').forEach((b) => {
     b.addEventListener('click', () => switchTab(b.dataset.tab));
   });
-  try {
-    const [data, program] = await Promise.all([apiGet(), loadProgram()]);
-    state = data;
-    applyProgram(program);
-  } catch (e) {
-    toast('Serveur injoignable.');
+
+  // 1) Affichage immediat depuis le cache local (fonctionne hors-ligne)
+  loadQueue();
+  const ls = loadLocalState();
+  if (ls) state = ls;
+  const lp = loadLocalProgram();
+  if (lp) {
+    try { customProgram = localStorage.getItem(LS_CUSTOM) === '1'; } catch (e) {}
+    applyProgram(lp);
   }
   document.getElementById('loader').remove();
   renderToday();
   renderWeek();
   switchTab('today');
+  updateSyncBadge();
+
+  // 2) Synchronisation en arriere-plan si en ligne (envoie la file + recupere l'etat serveur)
+  if (navigator.onLine) {
+    if (queue.length) {
+      await flushQueue();
+    } else {
+      try {
+        const [data, program] = await Promise.all([apiGet(), loadProgram()]);
+        state = data; saveLocalState();
+        applyProgram(program); saveLocalProgram(program);
+        renderAll();
+      } catch (e) { /* hors-ligne : on garde le cache local */ }
+    }
+    updateSyncBadge();
+  }
+
+  // 3) Reagit aux changements de connexion
+  window.addEventListener('online', () => { updateSyncBadge(); flushQueue(); });
+  window.addEventListener('offline', updateSyncBadge);
 }
 
 init();

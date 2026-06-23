@@ -7,3 +7,9 @@
 
 [functions]
   node_bundler = "esbuild"
+
+# Le Service Worker ne doit jamais etre servi depuis un cache navigateur perime
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
