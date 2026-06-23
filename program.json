@@ -1,0 +1,197 @@
+{
+  "themes": {
+    "Solo : apprivoiser sa voix": "Forger la voix",
+    "Solo : s'ecouter": "S'ecouter sans concession",
+    "1 personne : oser parler": "Passer a l'action",
+    "Petit groupe : prendre sa place": "Tenir le terrain",
+    "Rayonner": "Rayonner"
+  },
+  "citations": [
+    "On ne s'eleve pas au niveau de ses espoirs, on retombe au niveau de son entrainement.",
+    "La discipline pese des grammes, le regret pese des tonnes.",
+    "Le seul jour facile, c'etait hier.",
+    "Le courage, c'est parler malgre la peur, pas sans elle.",
+    "Ta voix compte. Le monde a besoin de l'entendre.",
+    "Embrasse l'inconfort : c'est la que tu grandis.",
+    "Ce n'est pas l'envie qui te porte, c'est l'habitude.",
+    "Parle, meme si ta voix tremble. — Maggie Kuhn",
+    "Tu n'as pas a etre parfait pour etre entendu.",
+    "Le silence que tu oses briser est ta plus grande victoire.",
+    "Un pas par jour, et bientot tu cours.",
+    "La confiance se construit une tache a la fois.",
+    "Ose. Le pire qui puisse arriver, c'est d'apprendre.",
+    "Maitrise les details et le reste suivra.",
+    "Sois fier : hier tu n'aurais pas ose. Aujourd'hui, si.",
+    "On ne nait pas orateur, on le devient, jour apres jour.",
+    "Le plus dur n'est pas de parler, c'est de commencer. Tu as commence.",
+    "La douleur est temporaire, la fierte est permanente.",
+    "Chaque tache cochee est une brique de ta confiance.",
+    "La maitrise vient de la repetition, pas du talent.",
+    "Quand tu crois avoir fini, tu n'es qu'a 40% de tes capacites.",
+    "Ton histoire merite d'etre racontee a voix haute.",
+    "L'aisance n'est pas l'absence de peur, c'est la peur apprivoisee.",
+    "Avance lentement, mais n'arrete jamais d'avancer.",
+    "Le micro le plus puissant, c'est ta conviction.",
+    "Tu es deja plus courageux qu'hier.",
+    "Gagne ta journee, puis recommence demain.",
+    "La voix se libere quand l'ego se tait.",
+    "N'attends pas d'etre pret : deviens-le en agissant.",
+    "Dix sur dix se construit en trente journees gagnees. Tu es en chemin."
+  ],
+  "missions": [
+    { "titre": "Forger la voix", "phase": "Solo : apprivoiser sa voix", "tasks": [
+      "Lis 3 pages a voix haute, DEBOUT, sans t'asseoir.",
+      "Recommence chaque phrase ratee jusqu'a la dire parfaitement.",
+      "Tiens 10 minutes chrono, sans interruption.",
+      "Termine par 20 respirations ventrales lentes." ] },
+    { "titre": "Articulation de fer", "phase": "Solo : apprivoiser sa voix", "tasks": [
+      "Repete 5 virelangues, 3 fois chacun, sans faute.",
+      "Relis une page en exagerant chaque consonne.",
+      "Enregistre 1 min et reecoute : note les mots avales.",
+      "Refais le passage rate jusqu'a 100% net." ] },
+    { "titre": "Maitrise du volume", "phase": "Solo : apprivoiser sa voix", "tasks": [
+      "Lis un paragraphe en chuchotant, puis a pleine voix.",
+      "Projette ta voix comme si la piece etait 2x plus grande.",
+      "Tiens le volume fort pendant 5 minutes sans forcer la gorge.",
+      "Bois de l'eau, repose la voix 2 minutes." ] },
+    { "titre": "Le pouvoir du silence", "phase": "Solo : apprivoiser sa voix", "tasks": [
+      "Lis un texte avec une pause d'1 seconde a chaque point.",
+      "Ajoute 3 silences volontaires de 2 secondes en plein milieu.",
+      "Interdiction totale de 'euh' : recommence si tu en dis un.",
+      "Relis une derniere fois, calme et maitrise." ] },
+    { "titre": "Souffle de combat", "phase": "Solo : apprivoiser sa voix", "tasks": [
+      "10 respirations ventrales profondes, main sur le ventre.",
+      "Lis 8 phrases longues d'un seul souffle chacune.",
+      "Compte a voix haute le plus loin possible sur une expiration.",
+      "Repete l'exercice du souffle 3 fois." ] },
+    { "titre": "Rythme et cadence", "phase": "Solo : apprivoiser sa voix", "tasks": [
+      "Lis un passage tres lentement, en pesant chaque mot.",
+      "Relis-le rapidement, sans perdre l'articulation.",
+      "Trouve et lis-le au 'bon' rythme, vivant.",
+      "Enregistre la meilleure version et garde-la." ] },
+    { "titre": "Voix qui rayonne", "phase": "Solo : apprivoiser sa voix", "tasks": [
+      "Lis une page entiere en souriant franchement.",
+      "Mets une emotion forte (joie, colere) sur un paragraphe.",
+      "Tiens-toi droit, epaules ouvertes, menton haut.",
+      "Bilan semaine 1 : note ta plus grande progression." ] },
+
+    { "titre": "Premier face-a-face", "phase": "Solo : s'ecouter", "tasks": [
+      "Enregistre 60 s ou tu te presentes, sans script.",
+      "Reecoute SANS te juger : note 1 chose que tu aimes.",
+      "Refais une 2e prise, plus assuree.",
+      "Felicite-toi a voix haute d'avoir ose." ] },
+    { "titre": "Chasse aux tics", "phase": "Solo : s'ecouter", "tasks": [
+      "Parle 2 min en libre et compte tes 'euh'.",
+      "Refais la meme prise avec un objectif : -50% de 'euh'.",
+      "Remplace chaque 'euh' par un silence.",
+      "Note ton score de tics pour demain." ] },
+    { "titre": "Camera allumee", "phase": "Solo : s'ecouter", "tasks": [
+      "Filme 30 s : pourquoi tu veux progresser.",
+      "Observe ta posture et tes mains, sans critique.",
+      "Refais la prise en corrigeant 1 seul detail.",
+      "Garde la meilleure video." ] },
+    { "titre": "Raconter sans filet", "phase": "Solo : s'ecouter", "tasks": [
+      "Enregistre 2 min : raconte un bon souvenir, sans notes.",
+      "Reecoute : la structure debut-milieu-fin est-elle la ?",
+      "Refais en soignant la chute de l'histoire.",
+      "Note ce qui rendait l'histoire vivante." ] },
+    { "titre": "Jouer l'emotion", "phase": "Solo : s'ecouter", "tasks": [
+      "Lis le meme texte avec 3 emotions differentes.",
+      "Enregistre les 3 versions.",
+      "Reecoute : l'emotion s'entend-elle vraiment ?",
+      "Refais la version la moins convaincante." ] },
+    { "titre": "Le pitch de 30 secondes", "phase": "Solo : s'ecouter", "tasks": [
+      "Ecris un pitch de toi en 30 s.",
+      "Repete-le 5 fois a voix haute.",
+      "Enregistre la version finale, fluide et nette.",
+      "Apprends-le par coeur : c'est ton arme." ] },
+    { "titre": "Inspection generale", "phase": "Solo : s'ecouter", "tasks": [
+      "Reecoute tes 3 meilleurs enregistrements de la semaine.",
+      "Liste 3 forces et 1 axe de travail.",
+      "Refais ton pitch en visant ces 3 forces.",
+      "Bilan semaine 2 : tu sais maintenant t'ecouter." ] },
+
+    { "titre": "Briser la glace", "phase": "1 personne : oser parler", "tasks": [
+      "Dis bonjour, a voix claire et en regardant dans les yeux, a 3 personnes.",
+      "Fais 1 compliment sincere a quelqu'un.",
+      "Pose 1 vraie question et ecoute la reponse en entier.",
+      "Note la reaction des gens : positive, non ?" ] },
+    { "titre": "Tenir l'echange", "phase": "1 personne : oser parler", "tasks": [
+      "Engage une conversation de 5 min avec une personne.",
+      "Pose au moins 3 questions ouvertes.",
+      "Raconte une anecdote de ta journee.",
+      "Termine en remerciant la personne." ] },
+    { "titre": "Donner son avis", "phase": "1 personne : oser parler", "tasks": [
+      "Donne ton opinion sur un sujet leger, sans la minimiser.",
+      "Assume un 'je pense que' clair et net.",
+      "Maintiens le contact visuel en parlant.",
+      "Ne t'excuse pas d'avoir un avis." ] },
+    { "titre": "Exprimer un ressenti", "phase": "1 personne : oser parler", "tasks": [
+      "Dis a un proche : 'je suis fier de…' ou 'j'ai aime quand…'.",
+      "Tiens la phrase sans rire nerveux ni fuite du regard.",
+      "Ecoute sa reaction.",
+      "Note ce que ca t'a fait." ] },
+    { "titre": "Raconter pour captiver", "phase": "1 personne : oser parler", "tasks": [
+      "Raconte une histoire de 2 min a une personne.",
+      "Soigne le debut (accroche) et la fin (chute).",
+      "Varie ton rythme et tes silences.",
+      "Demande-lui ce qu'elle a retenu." ] },
+    { "titre": "Demander quelque chose", "phase": "1 personne : oser parler", "tasks": [
+      "Formule une demande claire a quelqu'un (un service, un avis).",
+      "Va droit au but, sans tourner autour.",
+      "Accepte un 'non' sans te justifier 10 fois.",
+      "Note : demander, ce n'est pas deranger." ] },
+    { "titre": "Le debriefing", "phase": "1 personne : oser parler", "tasks": [
+      "Repasse en revue tes interactions de la semaine.",
+      "Refais une conversation que tu avais 'ratee', mieux.",
+      "Liste 3 progres concrets.",
+      "Bilan semaine 3 : tu oses parler aux autres." ] },
+
+    { "titre": "Entrer dans la melee", "phase": "Petit groupe : prendre sa place", "tasks": [
+      "Dans un groupe de 3+, prends la parole au moins 1 fois.",
+      "Ajoute une idee, meme courte.",
+      "Regarde chaque personne a tour de role.",
+      "Ne t'excuse pas d'avoir coupe le silence." ] },
+    { "titre": "Poser sa question", "phase": "Petit groupe : prendre sa place", "tasks": [
+      "Pose une question a voix haute devant 3+ personnes.",
+      "Parle assez fort pour que tous entendent.",
+      "Tiens ta posture le temps de la reponse.",
+      "Rebondis sur la reponse avec une remarque." ] },
+    { "titre": "Raconter au groupe", "phase": "Petit groupe : prendre sa place", "tasks": [
+      "Raconte une anecdote a 3 personnes.",
+      "Balaye le groupe du regard.",
+      "Gere les coupures sans perdre le fil.",
+      "Termine par une chute nette." ] },
+    { "titre": "Defendre une idee", "phase": "Petit groupe : prendre sa place", "tasks": [
+      "Defends calmement une idee qui te tient a coeur, 1 min.",
+      "Argumente avec 2 raisons claires.",
+      "Reste calme face a une objection.",
+      "Conclus ta position sans te renier." ] },
+    { "titre": "Ecouter et rebondir", "phase": "Petit groupe : prendre sa place", "tasks": [
+      "Reformule l'idee de quelqu'un ('si je comprends bien…').",
+      "Ajoute la tienne juste apres.",
+      "Fais le lien entre 2 interventions du groupe.",
+      "Note : ecouter rend ta parole plus forte." ] },
+    { "titre": "Oser le ton joueur", "phase": "Petit groupe : prendre sa place", "tasks": [
+      "Glisse une touche d'humour dans un echange de groupe.",
+      "Assume si ca ne fait pas rire : continue.",
+      "Refais une remarque legere plus tard.",
+      "Note l'effet de l'humour sur l'ambiance." ] },
+    { "titre": "Mener la synthese", "phase": "Petit groupe : prendre sa place", "tasks": [
+      "A la fin d'une discussion, propose un resume a voix haute.",
+      "Structure : 'donc on dirait que…'.",
+      "Verifie que le groupe est d'accord.",
+      "Bilan semaine 4 : tu prends ta place." ] },
+
+    { "titre": "La presentation", "phase": "Rayonner", "tasks": [
+      "Prepare un sujet que tu aimes, plan en 3 points.",
+      "Repete-le 3 fois a voix haute, debout.",
+      "Presente-le 3 min devant un groupe (reel ou camera).",
+      "Demande un retour, note 1 force et 1 axe." ] },
+    { "titre": "L'improvisation", "phase": "Rayonner", "tasks": [
+      "Demande un theme au hasard a quelqu'un.",
+      "Improvise 2 min dessus, sans preparation.",
+      "Refais sur un 2e theme.",
+      "Bilan final : tu es devenu un orateur. Mission accomplie." ] }
+  ]
+}

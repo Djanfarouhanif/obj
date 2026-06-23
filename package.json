@@ -1,0 +1,13 @@
+{
+  "name": "copilote-de-parole",
+  "version": "1.0.0",
+  "description": "Copilote de Parole — une mission par jour pour passer de 1/10 a 10/10 en prise de parole. Mini-serveur Node natif + API REST CRUD + data.json.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "license": "MIT"
+}
