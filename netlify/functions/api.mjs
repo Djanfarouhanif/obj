@@ -15,6 +15,31 @@ import { getStore } from '@netlify/blobs';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const STORE = 'copilote';
 const KEY = 'state';
+const PROGRAM_KEY = 'program';
+
+// Valide la structure d'un programme importe (objectifs personnalises).
+function validProgram(p) {
+  if (!p || typeof p !== 'object') return false;
+  if (!Array.isArray(p.missions) || p.missions.length === 0) return false;
+  return p.missions.every((m) =>
+    m && typeof m.titre === 'string' &&
+    Array.isArray(m.tasks) && m.tasks.length > 0 &&
+    m.tasks.every((t) => typeof t === 'string')
+  );
+}
+
+// Nettoie un programme avant stockage.
+function sanitizeProgram(p) {
+  return {
+    themes: (p.themes && typeof p.themes === 'object') ? p.themes : {},
+    citations: Array.isArray(p.citations) ? p.citations.filter((c) => typeof c === 'string') : [],
+    missions: p.missions.map((m) => ({
+      titre: String(m.titre),
+      phase: typeof m.phase === 'string' ? m.phase : '',
+      tasks: m.tasks.map((t) => String(t))
+    }))
+  };
+}
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -79,6 +104,29 @@ export default async (req) => {
     // GET /api/data
     if (method === 'GET' && pathname === '/api/data') {
       return json(200, await loadData(store));
+    }
+
+    // GET /api/program — programme personnalise (404 => l'app utilise le defaut statique)
+    if (method === 'GET' && pathname === '/api/program') {
+      const p = await store.get(PROGRAM_KEY, { type: 'json' });
+      if (!p) return json(404, { error: 'Aucun programme personnalise.' });
+      return json(200, p);
+    }
+
+    // PUT /api/program — importe / remplace les objectifs personnalises
+    if (method === 'PUT' && pathname === '/api/program') {
+      if (!validProgram(body)) {
+        return json(400, { error: 'JSON invalide : il faut un tableau "missions" avec { titre, tasks: [..] }.' });
+      }
+      const clean = sanitizeProgram(body);
+      await store.setJSON(PROGRAM_KEY, clean);
+      return json(200, clean);
+    }
+
+    // DELETE /api/program — revient au programme par defaut
+    if (method === 'DELETE' && pathname === '/api/program') {
+      await store.delete(PROGRAM_KEY);
+      return json(200, { ok: true });
     }
 
     // PUT /api/data — reset / remplacement complet

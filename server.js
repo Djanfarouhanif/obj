@@ -29,9 +29,32 @@ const path = require('path');
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 const DATA_FILE = path.join(__dirname, 'data.json');
+const CUSTOM_PROGRAM_FILE = path.join(__dirname, 'custom-program.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function validProgram(p) {
+  if (!p || typeof p !== 'object') return false;
+  if (!Array.isArray(p.missions) || p.missions.length === 0) return false;
+  return p.missions.every((m) =>
+    m && typeof m.titre === 'string' &&
+    Array.isArray(m.tasks) && m.tasks.length > 0 &&
+    m.tasks.every((t) => typeof t === 'string')
+  );
+}
+
+function sanitizeProgram(p) {
+  return {
+    themes: (p.themes && typeof p.themes === 'object') ? p.themes : {},
+    citations: Array.isArray(p.citations) ? p.citations.filter((c) => typeof c === 'string') : [],
+    missions: p.missions.map((m) => ({
+      titre: String(m.titre),
+      phase: typeof m.phase === 'string' ? m.phase : '',
+      tasks: m.tasks.map((t) => String(t))
+    }))
+  };
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -131,6 +154,35 @@ async function handleApi(req, res, pathname) {
   // GET /api/data — Read
   if (req.method === 'GET' && pathname === '/api/data') {
     return sendJSON(res, 200, readData());
+  }
+
+  // GET /api/program — programme personnalise (404 => defaut statique)
+  if (req.method === 'GET' && pathname === '/api/program') {
+    try {
+      const raw = fs.readFileSync(CUSTOM_PROGRAM_FILE, 'utf8');
+      return sendJSON(res, 200, JSON.parse(raw));
+    } catch (e) {
+      return sendJSON(res, 404, { error: 'Aucun programme personnalise.' });
+    }
+  }
+
+  // PUT /api/program — importe / remplace les objectifs
+  if (req.method === 'PUT' && pathname === '/api/program') {
+    let body;
+    try { body = await readBody(req); }
+    catch (e) { return sendJSON(res, 400, { error: e.message }); }
+    if (!validProgram(body)) {
+      return sendJSON(res, 400, { error: 'JSON invalide : il faut un tableau "missions" avec { titre, tasks: [..] }.' });
+    }
+    const clean = sanitizeProgram(body);
+    fs.writeFileSync(CUSTOM_PROGRAM_FILE, JSON.stringify(clean, null, 2), 'utf8');
+    return sendJSON(res, 200, clean);
+  }
+
+  // DELETE /api/program — revient au programme par defaut
+  if (req.method === 'DELETE' && pathname === '/api/program') {
+    try { fs.unlinkSync(CUSTOM_PROGRAM_FILE); } catch (e) {}
+    return sendJSON(res, 200, { ok: true });
   }
 
   // POST /api/progress — coche une tache
