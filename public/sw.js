@@ -3,15 +3,17 @@
    Les appels /api/* ne sont JAMAIS mis en cache : la synchronisation est geree
    par script.js (etat local + file d'attente). */
 
-const CACHE = 'cdp-cache-v1';
+const CACHE = 'cdp-cache-v2';
 
-// Ressources locales pre-cachees a l'installation
+// Ressources locales pre-cachees a l'installation (tout est en local => hors-ligne complet)
 const ASSETS = [
   './',
   './index.html',
   './script.js',
   './program.json',
-  './manifest.webmanifest'
+  './manifest.webmanifest',
+  './vendor/tailwind.js',
+  './vendor/chart.umd.min.js'
 ];
 
 self.addEventListener('install', (event) => {
