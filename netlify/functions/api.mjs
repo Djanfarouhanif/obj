@@ -46,7 +46,7 @@ function todayISO() {
 }
 
 function defaultData() {
-  return { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [] };
+  return { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [], ideas: [] };
 }
 
 function normalizePhrases(list) {
@@ -60,11 +60,24 @@ function normalizePhrases(list) {
     }));
 }
 
+function normalizeIdeas(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((x) => x && typeof x === 'object' && x.id != null)
+    .map((x) => ({
+      id: String(x.id),
+      text: String(x.text || '').slice(0, 2000),
+      pct: Math.max(0, Math.min(100, Math.round(Number(x.pct) || 0))),
+      createdAt: x.createdAt ? String(x.createdAt) : ''
+    }));
+}
+
 function normalize(d) {
   if (!d || typeof d !== 'object') return defaultData();
   if (!Array.isArray(d.completions)) d.completions = [];
   if (!d.progress || typeof d.progress !== 'object') d.progress = {};
   d.phrases = normalizePhrases(d.phrases);
+  d.ideas = normalizeIdeas(d.ideas);
   if (!d.startDate) d.startDate = todayISO();
   d.version = 2;
   return d;
@@ -158,7 +171,8 @@ export default async (req) => {
           ? body.completions.filter((d) => DATE_RE.test(d)).sort()
           : [],
         progress,
-        phrases: normalizePhrases(body.phrases)
+        phrases: normalizePhrases(body.phrases),
+        ideas: normalizeIdeas(body.ideas)
       };
       await saveData(store, next);
       return json(200, next);
@@ -197,6 +211,42 @@ export default async (req) => {
       const idx = data.phrases.findIndex((p) => p.id === id);
       if (idx === -1) return json(404, { error: 'Phrase introuvable.' });
       data.phrases.splice(idx, 1);
+      await saveData(store, data);
+      return json(200, data);
+    }
+
+    // POST /api/ideas — ajoute une idee/note
+    if (method === 'POST' && pathname === '/api/ideas') {
+      const text = (body && body.text != null) ? String(body.text).trim() : '';
+      if (!text) return json(400, { error: 'Champ "text" requis.' });
+      const id = (body && body.id) ? String(body.id) : ('i' + Date.now());
+      const data = await loadData(store);
+      if (!data.ideas.some((x) => x.id === id)) {
+        data.ideas.push({ id, text: text.slice(0, 2000), pct: 0, createdAt: (body && body.createdAt) ? String(body.createdAt) : new Date().toISOString() });
+        await saveData(store, data);
+      }
+      return json(201, data);
+    }
+
+    // PUT /api/ideas/:id — met a jour une idee (pct et/ou texte)
+    if (method === 'PUT' && pathname.startsWith('/api/ideas/')) {
+      const id = decodeURIComponent(pathname.slice('/api/ideas/'.length));
+      const data = await loadData(store);
+      const idea = data.ideas.find((x) => x.id === id);
+      if (!idea) return json(404, { error: 'Idee introuvable.' });
+      if (body.pct != null) idea.pct = Math.max(0, Math.min(100, Math.round(Number(body.pct) || 0)));
+      if (typeof body.text === 'string') idea.text = body.text.slice(0, 2000);
+      await saveData(store, data);
+      return json(200, data);
+    }
+
+    // DELETE /api/ideas/:id — supprime une idee
+    if (method === 'DELETE' && pathname.startsWith('/api/ideas/')) {
+      const id = decodeURIComponent(pathname.slice('/api/ideas/'.length));
+      const data = await loadData(store);
+      const idx = data.ideas.findIndex((x) => x.id === id);
+      if (idx === -1) return json(404, { error: 'Idee introuvable.' });
+      data.ideas.splice(idx, 1);
       await saveData(store, data);
       return json(200, data);
     }

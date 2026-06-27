@@ -3,5 +3,13 @@
   "startDate": "2026-06-27",
   "completions": [],
   "progress": {},
-  "phrases": []
+  "phrases": [],
+  "ideas": [
+    {
+      "id": "i1782585049322710",
+      "text": "Test",
+      "pct": 100,
+      "createdAt": "2026-06-27T18:30:49.322Z"
+    }
+  ]
 }

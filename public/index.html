@@ -85,22 +85,27 @@
       <section id="view-today" class="hidden"></section>
       <section id="view-progress" class="hidden"></section>
       <section id="view-lecture" class="hidden"></section>
+      <section id="view-ideas" class="hidden"></section>
       <section id="view-settings" class="hidden"></section>
     </main>
 
     <nav class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white/95 backdrop-blur border-t border-slate-200 safe-bottom z-20">
-      <div class="grid grid-cols-4">
+      <div class="grid grid-cols-5">
         <button data-tab="today" class="tab-btn flex flex-col items-center gap-1 py-3 text-[11px] text-slate-400 transition-colors">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V10"/></svg>
           <span>Aujourd'hui</span>
         </button>
-        <button data-tab="progress" class="tab-btn flex flex-col items-center gap-1 py-3 text-[11px] text-slate-400 transition-colors">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18M7 14l3-3 3 3 5-6"/></svg>
-          <span>Progrès</span>
-        </button>
         <button data-tab="lecture" class="tab-btn flex flex-col items-center gap-1 py-3 text-[11px] text-slate-400 transition-colors">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.5C10.5 5 8 4.5 4 5v13c4-.5 6.5 0 8 1.5 1.5-1.5 4-2 8-1.5V5c-4-.5-6.5 0-8 1.5zM12 6.5V20"/></svg>
           <span>Lecture</span>
+        </button>
+        <button data-tab="ideas" class="tab-btn flex flex-col items-center gap-1 py-3 text-[11px] text-slate-400 transition-colors">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 18h6M10 21h4M12 3a6 6 0 00-3.6 10.8c.6.45 1 1.15 1.1 1.9l.1.8h4.8l.1-.8c.1-.75.5-1.45 1.1-1.9A6 6 0 0012 3z"/></svg>
+          <span>Idées</span>
+        </button>
+        <button data-tab="progress" class="tab-btn flex flex-col items-center gap-1 py-3 text-[11px] text-slate-400 transition-colors">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18M7 14l3-3 3 3 5-6"/></svg>
+          <span>Progrès</span>
         </button>
         <button data-tab="settings" class="tab-btn flex flex-col items-center gap-1 py-3 text-[11px] text-slate-400 transition-colors">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.3 4.3a1 1 0 011.4 0l.5.6a1 1 0 001 .3l.8-.2a1 1 0 011.2.7l.2.8a1 1 0 00.7.7l.8.2a1 1 0 01.7 1.2l-.2.8a1 1 0 00.3 1l.6.5a1 1 0 010 1.4l-.6.5a1 1 0 00-.3 1l.2.8a1 1 0 01-.7 1.2l-.8.2a1 1 0 00-.7.7l-.2.8a1 1 0 01-1.2.7l-.8-.2a1 1 0 00-1 .3l-.5.6a1 1 0 01-1.4 0l-.5-.6a1 1 0 00-1-.3l-.8.2a1 1 0 01-1.2-.7l-.2-.8a1 1 0 00-.7-.7l-.8-.2a1 1 0 01-.7-1.2l.2-.8a1 1 0 00-.3-1l-.6-.5a1 1 0 010-1.4l.6-.5a1 1 0 00.3-1l-.2-.8a1 1 0 01.7-1.2l.8-.2a1 1 0 00.7-.7l.2-.8a1 1 0 011.2-.7l.8.2a1 1 0 001-.3l.5-.6z"/><circle cx="12" cy="12" r="3"/></svg>

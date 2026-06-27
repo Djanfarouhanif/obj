@@ -81,7 +81,7 @@ function todayISO() {
 }
 
 function defaultData() {
-  return { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [] };
+  return { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [], ideas: [] };
 }
 
 function normalizePhrases(list) {
@@ -95,6 +95,18 @@ function normalizePhrases(list) {
     }));
 }
 
+function normalizeIdeas(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((x) => x && typeof x === 'object' && x.id != null)
+    .map((x) => ({
+      id: String(x.id),
+      text: String(x.text || '').slice(0, 2000),
+      pct: Math.max(0, Math.min(100, Math.round(Number(x.pct) || 0))),
+      createdAt: x.createdAt ? String(x.createdAt) : ''
+    }));
+}
+
 function readData() {
   try {
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
@@ -103,6 +115,7 @@ function readData() {
     if (!Array.isArray(data.completions)) data.completions = [];
     if (!data.progress || typeof data.progress !== 'object') data.progress = {};
     data.phrases = normalizePhrases(data.phrases);
+    data.ideas = normalizeIdeas(data.ideas);
     if (!data.startDate) data.startDate = todayISO();
     data.version = 2;
     return data;
@@ -297,7 +310,8 @@ async function handleApi(req, res, pathname) {
         ? body.completions.filter((d) => DATE_RE.test(d)).sort()
         : [],
       progress,
-      phrases: normalizePhrases(body.phrases)
+      phrases: normalizePhrases(body.phrases),
+      ideas: normalizeIdeas(body.ideas)
     };
     writeData(next);
     return sendJSON(res, 200, next);
@@ -344,6 +358,50 @@ async function handleApi(req, res, pathname) {
     const idx = data.phrases.findIndex((p) => p.id === id);
     if (idx === -1) return sendJSON(res, 404, { error: 'Phrase introuvable.' });
     data.phrases.splice(idx, 1);
+    writeData(data);
+    return sendJSON(res, 200, data);
+  }
+
+  // POST /api/ideas — ajoute une idee/note
+  if (req.method === 'POST' && pathname === '/api/ideas') {
+    let body;
+    try { body = await readBody(req); }
+    catch (e) { return sendJSON(res, 400, { error: e.message }); }
+
+    const text = (body && body.text != null) ? String(body.text).trim() : '';
+    if (!text) return sendJSON(res, 400, { error: 'Champ "text" requis.' });
+    const id = (body && body.id) ? String(body.id) : ('i' + Date.now());
+    const data = readData();
+    if (!data.ideas.some((x) => x.id === id)) {
+      data.ideas.push({ id, text: text.slice(0, 2000), pct: 0, createdAt: (body && body.createdAt) ? String(body.createdAt) : new Date().toISOString() });
+      writeData(data);
+    }
+    return sendJSON(res, 201, data);
+  }
+
+  // PUT /api/ideas/:id — met a jour une idee (pct et/ou texte)
+  if (req.method === 'PUT' && pathname.startsWith('/api/ideas/')) {
+    let body;
+    try { body = await readBody(req); }
+    catch (e) { return sendJSON(res, 400, { error: e.message }); }
+
+    const id = decodeURIComponent(pathname.slice('/api/ideas/'.length));
+    const data = readData();
+    const idea = data.ideas.find((x) => x.id === id);
+    if (!idea) return sendJSON(res, 404, { error: 'Idee introuvable.' });
+    if (body.pct != null) idea.pct = Math.max(0, Math.min(100, Math.round(Number(body.pct) || 0)));
+    if (typeof body.text === 'string') idea.text = body.text.slice(0, 2000);
+    writeData(data);
+    return sendJSON(res, 200, data);
+  }
+
+  // DELETE /api/ideas/:id — supprime une idee
+  if (req.method === 'DELETE' && pathname.startsWith('/api/ideas/')) {
+    const id = decodeURIComponent(pathname.slice('/api/ideas/'.length));
+    const data = readData();
+    const idx = data.ideas.findIndex((x) => x.id === id);
+    if (idx === -1) return sendJSON(res, 404, { error: 'Idee introuvable.' });
+    data.ideas.splice(idx, 1);
     writeData(data);
     return sendJSON(res, 200, data);
   }

@@ -15,7 +15,7 @@ let CITATIONS = [];
 // =========================================================================
 // ETAT & API
 // =========================================================================
-let state = { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [] };
+let state = { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [], ideas: [] };
 let chart = null;
 let currentTab = 'today';
 let customProgram = false;
@@ -50,8 +50,8 @@ function apiComplete(date) {
 }
 function apiUncomplete(date) { return apiFetch('/completions/' + date, { method: 'DELETE' }); }
 function apiReset() {
-  // On reinitialise la progression mais on CONSERVE les phrases/citations.
-  return apiFetch('/data', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: state.phrases }) });
+  // On reinitialise la progression mais on CONSERVE les phrases et les idees.
+  return apiFetch('/data', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: state.phrases, ideas: state.ideas }) });
 }
 function apiSaveProgram(obj) {
   return apiFetch('/program', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) });
@@ -66,6 +66,15 @@ function apiReadPhrase(id, date) {
   return apiFetch('/phrases/' + encodeURIComponent(id) + '/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }) });
 }
 function apiDeletePhrase(id) { return apiFetch('/phrases/' + encodeURIComponent(id), { method: 'DELETE' }); }
+
+// --- Idees / notes ---
+function apiAddIdea(id, text, createdAt) {
+  return apiFetch('/ideas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, text, createdAt }) });
+}
+function apiSetIdea(id, pct) {
+  return apiFetch('/ideas/' + encodeURIComponent(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pct }) });
+}
+function apiDeleteIdea(id) { return apiFetch('/ideas/' + encodeURIComponent(id), { method: 'DELETE' }); }
 
 async function apiDefaultProgram() {
   // program.json : programme par defaut (fichier statique, dispo hors-ligne via le Service Worker)
@@ -147,8 +156,63 @@ function sendOp(op) {
     case 'addPhrase': return apiAddPhrase(op.id, op.text);
     case 'readPhrase': return apiReadPhrase(op.id, op.date);
     case 'deletePhrase': return apiDeletePhrase(op.id);
+    case 'addIdea': return apiAddIdea(op.id, op.text, op.createdAt);
+    case 'setIdea': return apiSetIdea(op.id, op.pct);
+    case 'deleteIdea': return apiDeleteIdea(op.id);
     default: return Promise.resolve();
   }
+}
+
+// --- Idees : actions local-first ---
+const IDEA_STEP = 10; // +10% par clic
+
+function ideaColor(pct) {
+  if (pct <= 0) return '#94a3b8';            // gris : pas commencee
+  const hue = 140 - (140 * pct / 100);        // 140 vert -> 0 rouge
+  return `hsl(${Math.round(hue)}, 72%, 42%)`;
+}
+
+function addIdea(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  const id = 'i' + Date.now() + Math.floor(Math.random() * 1000);
+  const createdAt = new Date().toISOString();
+  if (!Array.isArray(state.ideas)) state.ideas = [];
+  state.ideas.unshift({ id, text, pct: 0, createdAt });
+  enqueue({ type: 'addIdea', id, text, createdAt });
+  saveLocalState();
+  renderIdeas();
+  flushQueue();
+}
+
+function bumpIdea(id) {
+  const it = (state.ideas || []).find((x) => x.id === id);
+  if (!it) return;
+  it.pct = Math.min(100, (it.pct || 0) + IDEA_STEP);
+  enqueue({ type: 'setIdea', id, pct: it.pct });
+  if (it.pct === 100) toast('Idee a 100% 🎯');
+  saveLocalState();
+  renderIdeas();
+  flushQueue();
+}
+
+function resetIdea(id) {
+  const it = (state.ideas || []).find((x) => x.id === id);
+  if (!it) return;
+  it.pct = 0;
+  enqueue({ type: 'setIdea', id, pct: 0 });
+  saveLocalState();
+  renderIdeas();
+  flushQueue();
+}
+
+function deleteIdea(id) {
+  if (!confirm('Supprimer cette idee ?')) return;
+  state.ideas = (state.ideas || []).filter((x) => x.id !== id);
+  enqueue({ type: 'deleteIdea', id });
+  saveLocalState();
+  renderIdeas();
+  flushQueue();
 }
 
 // --- Lecture : actions local-first ---
@@ -514,8 +578,8 @@ function renderProgress() {
   });
 
   document.getElementById('resetBtn').addEventListener('click', () => {
-    if (!confirm('Reinitialiser toute ta progression ? (tes phrases de lecture sont conservees)')) return;
-    state = { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: state.phrases || [] };
+    if (!confirm('Reinitialiser toute ta progression ? (tes phrases et idees sont conservees)')) return;
+    state = { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: state.phrases || [], ideas: state.ideas || [] };
     saveLocalState();
     enqueue({ type: 'reset' });
     toast('Progression reinitialisee.');
@@ -805,16 +869,79 @@ function escapeHtml(s) {
 }
 
 // =========================================================================
+// ONGLET : IDEES (notes avec pourcentage de progression)
+// =========================================================================
+function renderIdeas() {
+  const ideas = state.ideas || [];
+
+  const cards = ideas.map((it) => {
+    const pct = it.pct || 0;
+    const color = ideaColor(pct);
+    const done = pct >= 100;
+    const date = it.createdAt ? new Date(it.createdAt).toLocaleDateString('fr-FR') : '';
+    return `
+      <div class="bg-white rounded-2xl border ${done ? 'border-emerald-300' : 'border-slate-200'} shadow-sm overflow-hidden">
+        <button data-bump="${it.id}" class="idea-bump w-full text-left p-4 active:bg-slate-50 transition-colors">
+          <div class="flex items-start gap-3">
+            <p class="flex-1 text-[15px] leading-snug text-slate-800 whitespace-pre-wrap">${escapeHtml(it.text)}</p>
+            <span class="flex-shrink-0 font-display font-bold text-lg" style="color:${color}">${pct}%</span>
+          </div>
+          <div class="mt-3 w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-300" style="width:${pct}%;background:${color}"></div>
+          </div>
+          <p class="mt-2 text-xs text-slate-400">${done ? '🎯 Objectif atteint' : 'Tape pour avancer (+' + IDEA_STEP + '%)'}${date ? ' · ' + date : ''}</p>
+        </button>
+        <div class="flex items-center justify-end gap-3 px-4 py-2 border-t border-slate-100 text-xs">
+          <button data-reset="${it.id}" class="idea-reset text-slate-400 hover:text-slate-700">Remettre a 0</button>
+          <button data-del="${it.id}" class="idea-del text-slate-300 hover:text-red-500 text-lg leading-none" aria-label="Supprimer">✕</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  document.getElementById('view-ideas').innerHTML = `
+    <div class="fade-up mt-2">
+      <h3 class="font-display font-semibold text-lg text-slate-900">Mes idees</h3>
+      <p class="text-sm text-slate-500 mt-1">Note tes idees, puis tape dessus pour faire monter leur avancement.</p>
+
+      <div class="mt-4 flex gap-2">
+        <input id="ideaInput" type="text" maxlength="2000" placeholder="Note une idee, une tache, une pensee…"
+          class="flex-1 px-3 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 focus:outline-none focus:border-accent" />
+        <button id="addIdeaBtn" class="px-4 rounded-xl bg-gradient-to-r from-accent to-accent2 text-white font-semibold text-sm active:scale-95 transition-transform">Ajouter</button>
+      </div>
+
+      <div class="mt-5 space-y-3">
+        ${ideas.length ? cards : '<p class="text-center text-slate-400 py-12 text-sm">Aucune idee pour le moment. Note ta premiere ci-dessus.</p>'}
+      </div>
+    </div>
+  `;
+
+  const input = document.getElementById('ideaInput');
+  const add = () => { addIdea(input.value); };
+  document.getElementById('addIdeaBtn').addEventListener('click', add);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+  document.querySelectorAll('.idea-bump').forEach((b) => {
+    b.addEventListener('click', () => bumpIdea(b.dataset.bump));
+  });
+  document.querySelectorAll('.idea-reset').forEach((b) => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); resetIdea(b.dataset.reset); });
+  });
+  document.querySelectorAll('.idea-del').forEach((b) => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); deleteIdea(b.dataset.del); });
+  });
+}
+
+// =========================================================================
 // NAVIGATION
 // =========================================================================
 function renderAll() {
   renderToday();
   if (currentTab === 'progress') renderProgress();
   if (currentTab === 'lecture') renderLecture();
+  if (currentTab === 'ideas') renderIdeas();
 }
 function switchTab(tab) {
   currentTab = tab;
-  ['today', 'progress', 'lecture', 'settings'].forEach((t) => {
+  ['today', 'progress', 'lecture', 'ideas', 'settings'].forEach((t) => {
     document.getElementById('view-' + t).classList.toggle('hidden', t !== tab);
   });
   document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -824,6 +951,7 @@ function switchTab(tab) {
   });
   if (tab === 'progress') renderProgress();
   if (tab === 'lecture') renderLecture();
+  if (tab === 'ideas') renderIdeas();
   if (tab === 'settings') renderSettings();
 }
 function toast(msg) {
