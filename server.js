@@ -81,7 +81,18 @@ function todayISO() {
 }
 
 function defaultData() {
-  return { version: 2, startDate: todayISO(), completions: [], progress: {} };
+  return { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [] };
+}
+
+function normalizePhrases(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((p) => p && typeof p === 'object' && p.id != null)
+    .map((p) => ({
+      id: String(p.id),
+      text: String(p.text || '').slice(0, 1000),
+      reads: (p.reads && typeof p.reads === 'object') ? p.reads : {}
+    }));
 }
 
 function readData() {
@@ -91,6 +102,7 @@ function readData() {
     if (!data || typeof data !== 'object') throw new Error('format invalide');
     if (!Array.isArray(data.completions)) data.completions = [];
     if (!data.progress || typeof data.progress !== 'object') data.progress = {};
+    data.phrases = normalizePhrases(data.phrases);
     if (!data.startDate) data.startDate = todayISO();
     data.version = 2;
     return data;
@@ -284,10 +296,56 @@ async function handleApi(req, res, pathname) {
       completions: Array.isArray(body.completions)
         ? body.completions.filter((d) => DATE_RE.test(d)).sort()
         : [],
-      progress
+      progress,
+      phrases: normalizePhrases(body.phrases)
     };
     writeData(next);
     return sendJSON(res, 200, next);
+  }
+
+  // POST /api/phrases — ajoute une phrase/citation
+  if (req.method === 'POST' && pathname === '/api/phrases') {
+    let body;
+    try { body = await readBody(req); }
+    catch (e) { return sendJSON(res, 400, { error: e.message }); }
+
+    const text = (body && body.text != null) ? String(body.text).trim() : '';
+    if (!text) return sendJSON(res, 400, { error: 'Champ "text" requis.' });
+    const id = (body && body.id) ? String(body.id) : ('p' + Date.now());
+    const data = readData();
+    if (!data.phrases.some((p) => p.id === id)) {
+      data.phrases.push({ id, text: text.slice(0, 1000), reads: {} });
+      writeData(data);
+    }
+    return sendJSON(res, 201, data);
+  }
+
+  // POST /api/phrases/:id/read — enregistre une lecture (body { date })
+  if (req.method === 'POST' && /^\/api\/phrases\/[^/]+\/read$/.test(pathname)) {
+    let body;
+    try { body = await readBody(req); }
+    catch (e) { return sendJSON(res, 400, { error: e.message }); }
+
+    const id = decodeURIComponent(pathname.split('/')[3]);
+    const date = (body && body.date) || todayISO();
+    if (!DATE_RE.test(date)) return sendJSON(res, 400, { error: 'Date invalide.' });
+    const data = readData();
+    const phrase = data.phrases.find((p) => p.id === id);
+    if (!phrase) return sendJSON(res, 404, { error: 'Phrase introuvable.' });
+    phrase.reads[date] = (phrase.reads[date] || 0) + 1;
+    writeData(data);
+    return sendJSON(res, 200, data);
+  }
+
+  // DELETE /api/phrases/:id — supprime une phrase
+  if (req.method === 'DELETE' && pathname.startsWith('/api/phrases/')) {
+    const id = decodeURIComponent(pathname.slice('/api/phrases/'.length));
+    const data = readData();
+    const idx = data.phrases.findIndex((p) => p.id === id);
+    if (idx === -1) return sendJSON(res, 404, { error: 'Phrase introuvable.' });
+    data.phrases.splice(idx, 1);
+    writeData(data);
+    return sendJSON(res, 200, data);
   }
 
   return sendJSON(res, 404, { error: 'Route API inconnue.' });

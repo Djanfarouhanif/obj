@@ -15,7 +15,7 @@ let CITATIONS = [];
 // =========================================================================
 // ETAT & API
 // =========================================================================
-let state = { version: 2, startDate: todayISO(), completions: [], progress: {} };
+let state = { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [] };
 let chart = null;
 let currentTab = 'today';
 let customProgram = false;
@@ -50,12 +50,22 @@ function apiComplete(date) {
 }
 function apiUncomplete(date) { return apiFetch('/completions/' + date, { method: 'DELETE' }); }
 function apiReset() {
-  return apiFetch('/data', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: 2, startDate: todayISO(), completions: [], progress: {} }) });
+  // On reinitialise la progression mais on CONSERVE les phrases/citations.
+  return apiFetch('/data', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: state.phrases }) });
 }
 function apiSaveProgram(obj) {
   return apiFetch('/program', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) });
 }
 function apiDeleteProgram() { return apiFetch('/program', { method: 'DELETE' }); }
+
+// --- Phrases / citations (lecture) ---
+function apiAddPhrase(id, text) {
+  return apiFetch('/phrases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, text }) });
+}
+function apiReadPhrase(id, date) {
+  return apiFetch('/phrases/' + encodeURIComponent(id) + '/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }) });
+}
+function apiDeletePhrase(id) { return apiFetch('/phrases/' + encodeURIComponent(id), { method: 'DELETE' }); }
 
 async function apiDefaultProgram() {
   // program.json : programme par defaut (fichier statique, dispo hors-ligne via le Service Worker)
@@ -134,8 +144,47 @@ function sendOp(op) {
     case 'reset': return apiReset();
     case 'putProgram': return apiSaveProgram(op.program);
     case 'deleteProgram': return apiDeleteProgram();
+    case 'addPhrase': return apiAddPhrase(op.id, op.text);
+    case 'readPhrase': return apiReadPhrase(op.id, op.date);
+    case 'deletePhrase': return apiDeletePhrase(op.id);
     default: return Promise.resolve();
   }
+}
+
+// --- Lecture : actions local-first ---
+function phraseTotal(ph) { return Object.values(ph.reads || {}).reduce((a, b) => a + b, 0); }
+function phraseToday(ph) { return (ph.reads || {})[todayISO()] || 0; }
+
+function addPhrase(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  const id = 'p' + Date.now() + Math.floor(Math.random() * 1000);
+  if (!Array.isArray(state.phrases)) state.phrases = [];
+  state.phrases.push({ id, text, reads: {} });
+  enqueue({ type: 'addPhrase', id, text });
+  saveLocalState();
+  renderLecture();
+  flushQueue();
+}
+
+function readPhrase(id) {
+  const ph = (state.phrases || []).find((p) => p.id === id);
+  if (!ph) return;
+  const d = todayISO();
+  ph.reads[d] = (ph.reads[d] || 0) + 1;
+  enqueue({ type: 'readPhrase', id, date: d });
+  saveLocalState();
+  renderLecture();
+  flushQueue();
+}
+
+function deletePhrase(id) {
+  if (!confirm('Supprimer cette phrase et toutes ses statistiques ?')) return;
+  state.phrases = (state.phrases || []).filter((p) => p.id !== id);
+  enqueue({ type: 'deletePhrase', id });
+  saveLocalState();
+  renderLecture();
+  flushQueue();
 }
 
 // Vide la file d'attente puis resynchronise depuis le serveur
@@ -465,8 +514,8 @@ function renderProgress() {
   });
 
   document.getElementById('resetBtn').addEventListener('click', () => {
-    if (!confirm('Reinitialiser toute ta progression ? Cette action est irreversible.')) return;
-    state = { version: 2, startDate: todayISO(), completions: [], progress: {} };
+    if (!confirm('Reinitialiser toute ta progression ? (tes phrases de lecture sont conservees)')) return;
+    state = { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: state.phrases || [] };
     saveLocalState();
     enqueue({ type: 'reset' });
     toast('Progression reinitialisee.');
@@ -655,16 +704,118 @@ function downloadTemplate() {
 }
 
 // =========================================================================
+// ONGLET 5 : LECTURE (phrases / citations + courbe d'evolution)
+// =========================================================================
+
+// Courbe cumulee des lectures sur `days` jours (SVG inline, etire en largeur).
+function readsSparkline(reads, days) {
+  const today = new Date();
+  const startIso = fmt(addDays(today, -(days - 1)));
+  let base = 0;
+  for (const k in reads) { if (k < startIso) base += reads[k]; }
+  const series = [];
+  let cum = base;
+  for (let i = days - 1; i >= 0; i--) {
+    cum += reads[fmt(addDays(today, -i))] || 0;
+    series.push(cum);
+  }
+  const min = Math.min(...series);
+  const max = Math.max(...series);
+  const span = (max - min) || 1;
+  const w = 300, h = 48, pad = 4;
+  const pts = series.map((v, i) => {
+    const x = pad + (i / (series.length - 1)) * (w - 2 * pad);
+    const y = h - pad - ((v - min) / span) * (h - 2 * pad);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const flat = max === min;
+  return `<svg viewBox="0 0 ${w} ${h}" class="w-full h-12" preserveAspectRatio="none">
+    <polyline fill="none" stroke="${flat ? '#cbd5e1' : '#0e9f6e'}" stroke-width="2"
+      stroke-linejoin="round" stroke-linecap="round" points="${pts}" /></svg>`;
+}
+
+function renderLecture() {
+  const phrases = state.phrases || [];
+  const totalReads = phrases.reduce((a, p) => a + phraseTotal(p), 0);
+  const readToday = phrases.reduce((a, p) => a + phraseToday(p), 0);
+
+  const cards = phrases.map((p) => {
+    const total = phraseTotal(p);
+    const today = phraseToday(p);
+    return `
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <button data-read="${p.id}" class="phrase-read w-full text-left p-4 active:bg-emerald-50 transition-colors">
+          <p class="text-[15px] leading-snug text-slate-800">${escapeHtml(p.text)}</p>
+          <p class="mt-2 text-xs text-accent2 font-semibold">Tape pour compter une lecture +1</p>
+        </button>
+        <div class="px-4">${readsSparkline(p.reads, 30)}</div>
+        <div class="flex items-center justify-between px-4 py-3 border-t border-slate-100">
+          <div class="flex gap-4 text-sm">
+            <span class="text-slate-500">Aujourd'hui : <b class="text-slate-800">${today}</b></span>
+            <span class="text-slate-500">Total : <b class="text-accent2">${total}</b></span>
+          </div>
+          <button data-del="${p.id}" class="phrase-del text-slate-300 hover:text-red-500 text-lg leading-none" aria-label="Supprimer">✕</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  document.getElementById('view-lecture').innerHTML = `
+    <div class="fade-up mt-2">
+      <h3 class="font-display font-semibold text-lg text-slate-900">Mes phrases a apprendre</h3>
+      <p class="text-sm text-slate-500 mt-1">Ajoute des phrases, tape dessus a chaque lecture, et suis ta courbe d'apprentissage.</p>
+
+      <div class="mt-4 flex gap-2">
+        <input id="phraseInput" type="text" maxlength="1000" placeholder="Ecris une phrase ou citation a memoriser…"
+          class="flex-1 px-3 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 focus:outline-none focus:border-accent" />
+        <button id="addPhraseBtn" class="px-4 rounded-xl bg-gradient-to-r from-accent to-accent2 text-white font-semibold text-sm active:scale-95 transition-transform">Ajouter</button>
+      </div>
+
+      <div class="mt-4 grid grid-cols-2 gap-3">
+        <div class="bg-white rounded-2xl p-4 border border-slate-200 text-center shadow-sm">
+          <p class="font-display text-2xl font-bold text-accent2">${readToday}</p>
+          <p class="text-xs text-slate-500 mt-1">Lectures aujourd'hui</p>
+        </div>
+        <div class="bg-white rounded-2xl p-4 border border-slate-200 text-center shadow-sm">
+          <p class="font-display text-2xl font-bold text-accent2">${totalReads}</p>
+          <p class="text-xs text-slate-500 mt-1">Lectures au total</p>
+        </div>
+      </div>
+
+      <div class="mt-5 space-y-3">
+        ${phrases.length ? cards : '<p class="text-center text-slate-400 py-12 text-sm">Aucune phrase pour le moment. Ajoute ta premiere ci-dessus.</p>'}
+      </div>
+    </div>
+  `;
+
+  const input = document.getElementById('phraseInput');
+  const add = () => { addPhrase(input.value); };
+  document.getElementById('addPhraseBtn').addEventListener('click', add);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+  document.querySelectorAll('.phrase-read').forEach((b) => {
+    b.addEventListener('click', () => readPhrase(b.dataset.read));
+  });
+  document.querySelectorAll('.phrase-del').forEach((b) => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); deletePhrase(b.dataset.del); });
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// =========================================================================
 // NAVIGATION
 // =========================================================================
 function renderAll() {
   renderToday();
   renderWeek();
   if (currentTab === 'progress') renderProgress();
+  if (currentTab === 'lecture') renderLecture();
 }
 function switchTab(tab) {
   currentTab = tab;
-  ['today', 'week', 'progress', 'settings'].forEach((t) => {
+  ['today', 'week', 'progress', 'lecture', 'settings'].forEach((t) => {
     document.getElementById('view-' + t).classList.toggle('hidden', t !== tab);
   });
   document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -673,6 +824,7 @@ function switchTab(tab) {
     b.classList.toggle('text-slate-400', !active);
   });
   if (tab === 'progress') renderProgress();
+  if (tab === 'lecture') renderLecture();
   if (tab === 'settings') renderSettings();
 }
 function toast(msg) {
