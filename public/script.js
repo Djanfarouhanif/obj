@@ -181,7 +181,7 @@ function updateSyncBadge() {
     el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-1 rounded-full';
   } else if (queue.length > 0) {
     el.textContent = 'Sync ⏳ ' + queue.length;
-    el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-accent2 bg-orange-50 px-2 py-1 rounded-full';
+    el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-accent2 bg-emerald-50 px-2 py-1 rounded-full';
   } else {
     el.textContent = 'En ligne';
     el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full';
@@ -279,7 +279,7 @@ function renderToday() {
           <circle cx="60" cy="60" r="${R}" fill="none" stroke-width="10" class="ring-value"
             stroke="url(#grad)" stroke-dasharray="${C}" stroke-dashoffset="${offset}" />
           <defs><linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#f59e0b" /><stop offset="100%" stop-color="#ea580c" />
+            <stop offset="0%" stop-color="#0e9f6e" /><stop offset="100%" stop-color="#057a55" />
           </linearGradient></defs>
         </svg>
         <div class="absolute inset-0 flex flex-col items-center justify-center">
@@ -291,13 +291,13 @@ function renderToday() {
 
       <p class="mt-3 text-sm text-slate-500">Jour ${dayNum} / ${MISSIONS.length} · ${m.phase}</p>
 
-      <div class="mt-5 w-full bg-orange-50 rounded-2xl p-5 text-left border border-orange-100">
+      <div class="mt-5 w-full bg-emerald-50 rounded-2xl p-5 text-left border border-emerald-100">
         <div class="flex items-center justify-between">
           <p class="text-xs uppercase tracking-wider text-accent2 font-bold">Mission du jour</p>
           <p class="text-xs font-semibold ${complete ? 'text-emerald-600' : 'text-slate-500'}">${doneCount}/${total} taches</p>
         </div>
         <h2 class="font-display text-2xl font-bold mt-1 text-slate-900">Mission ${dayNum} : ${m.titre}</h2>
-        <div class="mt-3 w-full h-2 bg-orange-100 rounded-full overflow-hidden">
+        <div class="mt-3 w-full h-2 bg-emerald-100 rounded-full overflow-hidden">
           <div class="h-full bg-gradient-to-r from-accent to-accent2 transition-all duration-500" style="width:${(doneCount/total)*100}%"></div>
         </div>
       </div>
@@ -372,7 +372,7 @@ function renderWeek() {
     let icon, ring;
     if (set.has(iso)) { validated++; icon = '✅'; ring = 'border-emerald-200 bg-emerald-50'; }
     else if (iso > todayIso) { icon = '❓'; ring = 'border-slate-200 bg-slate-50'; }
-    else if (iso === todayIso) { icon = '⚪️'; ring = 'border-accent bg-orange-50'; }
+    else if (iso === todayIso) { icon = '⚪️'; ring = 'border-accent bg-emerald-50'; }
     else { icon = '🔴'; ring = 'border-red-200 bg-red-50'; }
     cells += `
       <div class="flex flex-col items-center gap-1 rounded-xl border ${ring} py-3">
@@ -386,7 +386,7 @@ function renderWeek() {
 
   document.getElementById('view-week').innerHTML = `
     <div class="fade-up mt-2">
-      <div class="bg-orange-50 rounded-2xl p-4 border border-orange-100">
+      <div class="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
         <p class="text-xs uppercase tracking-wider text-accent2 font-bold">Theme de la semaine</p>
         <h2 class="font-display text-2xl font-bold mt-1 text-slate-900">${theme}</h2>
       </div>
@@ -443,13 +443,13 @@ function renderProgress() {
     type: 'line',
     data: { labels, datasets: [{
       label: 'Score', data,
-      borderColor: '#ea580c',
+      borderColor: '#0e9f6e',
       backgroundColor: (c) => {
         const { ctx, chartArea } = c.chart;
-        if (!chartArea) return 'rgba(234,88,12,.12)';
+        if (!chartArea) return 'rgba(14,159,110,.12)';
         const g = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-        g.addColorStop(0, 'rgba(245,158,11,.30)');
-        g.addColorStop(1, 'rgba(245,158,11,0)');
+        g.addColorStop(0, 'rgba(14,159,110,.30)');
+        g.addColorStop(1, 'rgba(14,159,110,0)');
         return g;
       },
       fill: true, tension: .35, pointRadius: 0, borderWidth: 2.5
@@ -563,7 +563,7 @@ function renderSettings() {
     <div class="fade-up mt-2">
 
       <!-- Generateur IA -->
-      <div class="bg-orange-50 rounded-2xl p-4 border border-orange-100">
+      <div class="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
         <p class="text-xs uppercase tracking-wider text-accent2 font-bold">Generer mes objectifs avec une IA</p>
         <h2 class="font-display text-xl font-bold mt-1 text-slate-900">Assistant de creation</h2>
         <p class="mt-1 text-sm text-slate-600">Pour <span class="font-semibold">n'importe quel objectif</span> : apprendre une langue, un instrument, le sport, une competence...</p>
@@ -575,7 +575,7 @@ function renderSettings() {
           <li>Importe ce fichier juste en dessous.</li>
         </ol>
         <textarea id="aiPrompt" readonly rows="12"
-          class="mt-3 w-full text-xs font-mono p-3 rounded-lg border border-orange-200 bg-white text-slate-700 leading-relaxed"></textarea>
+          class="mt-3 w-full text-xs font-mono p-3 rounded-lg border border-emerald-200 bg-white text-slate-700 leading-relaxed"></textarea>
         <button id="copyPromptBtn" class="mt-2 w-full py-3 rounded-xl bg-gradient-to-r from-accent to-accent2 text-white font-semibold text-sm active:scale-95 transition-transform">
           Copier le prompt
         </button>
