@@ -403,10 +403,10 @@ function toggleTask(i, mission) {
 }
 
 // =========================================================================
-// ONGLET 2 : SEMAINE
+// Section SEMAINE (affichee dans l'onglet Progres)
 // =========================================================================
-function renderWeek() {
-  if (!MISSIONS.length) return;
+function weekSectionHtml() {
+  if (!MISSIONS.length) return '';
   const labels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
   const now = new Date();
   const dow = (now.getDay() + 6) % 7;
@@ -433,20 +433,18 @@ function renderWeek() {
 
   const theme = THEMES[MISSIONS[todaysMissionIndex()].phase] || '—';
 
-  document.getElementById('view-week').innerHTML = `
-    <div class="fade-up mt-2">
-      <div class="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
-        <p class="text-xs uppercase tracking-wider text-accent2 font-bold">Theme de la semaine</p>
-        <h2 class="font-display text-2xl font-bold mt-1 text-slate-900">${theme}</h2>
-      </div>
+  return `
+    <div class="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
+      <p class="text-xs uppercase tracking-wider text-accent2 font-bold">Theme de la semaine</p>
+      <h2 class="font-display text-2xl font-bold mt-1 text-slate-900">${theme}</h2>
+    </div>
 
-      <h3 class="font-display font-semibold text-lg mt-6 mb-3 text-slate-900">Semaine en cours</h3>
-      <div class="grid grid-cols-7 gap-2">${cells}</div>
+    <h3 class="font-display font-semibold text-lg mt-6 mb-3 text-slate-900">Semaine en cours</h3>
+    <div class="grid grid-cols-7 gap-2">${cells}</div>
 
-      <div class="mt-6 bg-white rounded-2xl p-5 border border-slate-200 text-center shadow-sm">
-        <p class="text-sm text-slate-500">Taux de reussite</p>
-        <p class="font-display text-3xl font-bold text-accent2 mt-1">${validated}/7 <span class="text-base text-slate-400">jours</span></p>
-      </div>
+    <div class="mt-4 bg-white rounded-2xl p-5 border border-slate-200 text-center shadow-sm">
+      <p class="text-sm text-slate-500">Taux de reussite</p>
+      <p class="font-display text-3xl font-bold text-accent2 mt-1">${validated}/7 <span class="text-base text-slate-400">jours</span></p>
     </div>
   `;
 }
@@ -457,7 +455,9 @@ function renderWeek() {
 function renderProgress() {
   document.getElementById('view-progress').innerHTML = `
     <div class="fade-up mt-2">
-      <h3 class="font-display font-semibold text-lg mb-3 text-slate-900">Evolution (30 jours)</h3>
+      ${weekSectionHtml()}
+
+      <h3 class="font-display font-semibold text-lg mt-8 mb-3 text-slate-900">Evolution (30 jours)</h3>
       <div class="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm">
         <canvas id="progressChart" height="200"></canvas>
       </div>
@@ -809,13 +809,12 @@ function escapeHtml(s) {
 // =========================================================================
 function renderAll() {
   renderToday();
-  renderWeek();
   if (currentTab === 'progress') renderProgress();
   if (currentTab === 'lecture') renderLecture();
 }
 function switchTab(tab) {
   currentTab = tab;
-  ['today', 'week', 'progress', 'lecture', 'settings'].forEach((t) => {
+  ['today', 'progress', 'lecture', 'settings'].forEach((t) => {
     document.getElementById('view-' + t).classList.toggle('hidden', t !== tab);
   });
   document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -854,7 +853,6 @@ async function init() {
   }
   document.getElementById('loader').remove();
   renderToday();
-  renderWeek();
   switchTab('today');
   updateSyncBadge();
 

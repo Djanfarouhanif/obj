@@ -3,7 +3,7 @@
    Les appels /api/* ne sont JAMAIS mis en cache : la synchronisation est geree
    par script.js (etat local + file d'attente). */
 
-const CACHE = 'cdp-cache-v3';
+const CACHE = 'cdp-cache-v4';
 
 // Ressources locales pre-cachees a l'installation (tout est en local => hors-ligne complet)
 const ASSETS = [
