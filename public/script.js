@@ -251,13 +251,17 @@ function deletePhrase(id) {
   flushQueue();
 }
 
-// Vide la file d'attente puis resynchronise depuis le serveur
+// Pousse la file d'attente vers le serveur (envoi seulement, AUCUN "pull").
+// L'etat local reste la source de verite pendant la session : on ne le réécrit
+// jamais depuis le serveur ici (sinon une action en cours pourrait etre annulee).
 async function flushQueue() {
   if (flushing) return;
   if (!navigator.onLine) { updateSyncBadge(); return; }
   flushing = true;
   updateSyncBadge();
   try {
+    // La boucle re-verifie queue.length a chaque tour : les ops ajoutees
+    // pendant un envoi (ex. plusieurs clics rapides) sont aussi traitees ici.
     while (queue.length) {
       const op = queue[0];
       try {
@@ -268,21 +272,26 @@ async function flushQueue() {
         queue.shift(); saveQueue();      // erreur serveur (4xx) : on abandonne cet op pour ne pas bloquer
       }
     }
-    if (queue.length === 0) {
-      // resync : recupere l'etat du serveur (et d'eventuels changements d'un autre appareil)
-      try {
-        const data = await apiGet();
-        state = data; saveLocalState();
-        const prog = await loadProgram();
-        applyProgram(prog); saveLocalProgram(prog);
-        renderAll();
-        if (currentTab === 'settings') renderSettings();
-      } catch (e) { /* hors-ligne : on garde l'etat local */ }
-    }
   } finally {
     flushing = false;
     updateSyncBadge();
   }
+}
+
+// Recupere l'etat du serveur et ECRASE le local. A n'appeler QU'au demarrage
+// et a la reconnexion — jamais apres une simple action.
+// Garde-fou : si des changements locaux sont encore en file, on ne tire pas
+// (sinon on ecraserait des actions non encore synchronisees).
+async function pullFromServer() {
+  if (!navigator.onLine || queue.length) return;
+  try {
+    const data = await apiGet();
+    state = data; saveLocalState();
+    const prog = await loadProgram();
+    applyProgram(prog); saveLocalProgram(prog);
+    renderAll();
+    if (currentTab === 'settings') renderSettings();
+  } catch (e) { /* hors-ligne : on garde l'etat local */ }
 }
 
 // Indicateur de synchronisation dans l'en-tete
@@ -290,12 +299,12 @@ function updateSyncBadge() {
   const el = document.getElementById('syncStatus');
   if (!el) return;
   if (!navigator.onLine) {
-    el.textContent = 'Hors-ligne';
+    // Hors-ligne : on indique le nombre de changements en attente de synchro.
+    const n = queue.length;
+    el.textContent = n > 0 ? ('Hors-ligne · ' + n) : 'Hors-ligne';
     el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-1 rounded-full';
-  } else if (queue.length > 0) {
-    el.textContent = 'Sync ⏳ ' + queue.length;
-    el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-accent2 bg-emerald-50 px-2 py-1 rounded-full';
   } else {
+    // En ligne : la synchro est automatique et silencieuse (pas de clignotement a chaque action).
     el.textContent = 'En ligne';
     el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full';
   }
@@ -984,23 +993,22 @@ async function init() {
   switchTab('today');
   updateSyncBadge();
 
-  // 2) Synchronisation en arriere-plan si en ligne (envoie la file + recupere l'etat serveur)
+  // 2) Au demarrage si en ligne : on envoie d'abord la file en attente,
+  //    PUIS on tire l'etat du serveur (resync complet).
   if (navigator.onLine) {
-    if (queue.length) {
-      await flushQueue();
-    } else {
-      try {
-        const [data, program] = await Promise.all([apiGet(), loadProgram()]);
-        state = data; saveLocalState();
-        applyProgram(program); saveLocalProgram(program);
-        renderAll();
-      } catch (e) { /* hors-ligne : on garde le cache local */ }
-    }
+    await flushQueue();
+    await pullFromServer();
     updateSyncBadge();
   }
 
-  // 3) Reagit aux changements de connexion
-  window.addEventListener('online', () => { updateSyncBadge(); flushQueue(); });
+  // 3) A la reconnexion (hors-ligne -> en ligne) : meme sequence.
+  //    C'est le SEUL moment, avec le demarrage, ou l'on resynchronise depuis le serveur.
+  window.addEventListener('online', async () => {
+    updateSyncBadge();
+    await flushQueue();
+    await pullFromServer();
+    updateSyncBadge();
+  });
   window.addEventListener('offline', updateSyncBadge);
 }
 
