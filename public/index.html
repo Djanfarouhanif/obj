@@ -121,10 +121,24 @@
 
   <script src="./script.js"></script>
   <script>
-    // Service Worker : permet le fonctionnement hors-ligne (mise en cache de l'app)
+    // Service Worker : fonctionnement hors-ligne + AUTO-MISE A JOUR.
+    // Des qu'une nouvelle version est publiee, l'app se recharge toute seule
+    // (plus besoin de recharger deux fois manuellement).
     if ('serviceWorker' in navigator) {
+      let refreshing = false;
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        // Ne recharge que lors d'une MISE A JOUR (pas a la 1re installation)
+        if (!hadController || refreshing) return;
+        refreshing = true;
+        window.location.reload();
+      });
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch(() => {});
+        navigator.serviceWorker.register('./sw.js').then((reg) => {
+          reg.update();
+          // Verifie s'il y a une nouvelle version toutes les heures
+          setInterval(() => reg.update(), 60 * 60 * 1000);
+        }).catch(() => {});
       });
     }
   </script>
