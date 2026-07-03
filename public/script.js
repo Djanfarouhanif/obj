@@ -116,6 +116,15 @@ const LS_STATE = 'cdp.state';
 const LS_QUEUE = 'cdp.queue';
 const LS_PROGRAM = 'cdp.program';
 const LS_CUSTOM = 'cdp.custom';
+const LS_CATCHUP = 'cdp.catchup';
+
+// Preference locale : rattrapage des jours manques (active par defaut)
+function catchupEnabled() {
+  try { return localStorage.getItem(LS_CATCHUP) !== '0'; } catch (e) { return true; }
+}
+function setCatchupEnabled(on) {
+  try { localStorage.setItem(LS_CATCHUP, on ? '1' : '0'); } catch (e) {}
+}
 let queue = [];
 let flushing = false;
 
@@ -340,6 +349,35 @@ function streak() {
   return count;
 }
 
+// Jours manques : dates entre startDate et hier, jamais validees
+function missedDays() {
+  const days = [];
+  const yesterday = fmt(addDays(new Date(), -1));
+  const set = new Set(state.completions);
+  let cursor = parseISO(state.startDate);
+  while (fmt(cursor) <= yesterday) {
+    const iso = fmt(cursor);
+    if (!set.has(iso)) days.push(iso);
+    cursor = addDays(cursor, 1);
+  }
+  return days;
+}
+
+function frDate(iso) {
+  return parseISO(iso).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+// Rattrapage : valide retroactivement un jour manque (repare la serie et avance la mission)
+function catchUpDay(date) {
+  if (!confirm('Rattraper le ' + frDate(date) + ' ?\nCe jour sera compte comme valide dans ta progression.')) return;
+  addCompletionLocal(date);
+  enqueue({ type: 'complete', date });
+  saveLocalState();
+  toast('Jour rattrape ! 💪');
+  renderAll();
+  flushQueue();
+}
+
 function citationOfDay() {
   if (!CITATIONS.length) return '';
   const idx = Math.abs(daysBetween(state.startDate, todayISO())) % CITATIONS.length;
@@ -491,17 +529,18 @@ function weekSectionHtml() {
   for (let i = 0; i < 7; i++) {
     const d = addDays(monday, i);
     const iso = fmt(d);
-    let icon, ring;
+    let icon, ring, missed = false;
     if (set.has(iso)) { validated++; icon = '✅'; ring = 'border-emerald-200 bg-emerald-50'; }
     else if (iso > todayIso) { icon = '❓'; ring = 'border-slate-200 bg-slate-50'; }
     else if (iso === todayIso) { icon = '⚪️'; ring = 'border-accent bg-emerald-50'; }
-    else { icon = '🔴'; ring = 'border-red-200 bg-red-50'; }
-    cells += `
-      <div class="flex flex-col items-center gap-1 rounded-xl border ${ring} py-3">
+    else { missed = catchupEnabled(); icon = '🔴'; ring = missed ? 'border-red-200 bg-red-50 active:bg-red-100' : 'border-red-200 bg-red-50'; }
+    const inner = `
         <span class="text-xs text-slate-400">${labels[i]}</span>
         <span class="text-2xl">${icon}</span>
-        <span class="text-[10px] text-slate-400">${d.getDate()}/${d.getMonth() + 1}</span>
-      </div>`;
+        <span class="text-[10px] ${missed ? 'text-red-400 font-semibold' : 'text-slate-400'}">${missed ? 'rattraper' : d.getDate() + '/' + (d.getMonth() + 1)}</span>`;
+    cells += missed
+      ? `<button data-catchup="${iso}" class="catchup-day flex flex-col items-center gap-1 rounded-xl border ${ring} py-3 transition-colors">${inner}</button>`
+      : `<div class="flex flex-col items-center gap-1 rounded-xl border ${ring} py-3">${inner}</div>`;
   }
 
   const theme = THEMES[MISSIONS[todaysMissionIndex()].phase] || '—';
@@ -523,12 +562,46 @@ function weekSectionHtml() {
 }
 
 // =========================================================================
+// Section RATTRAPAGE (affichee dans l'onglet Progres)
+// =========================================================================
+const CATCHUP_MAX_SHOWN = 10;
+
+function catchupSectionHtml() {
+  if (!catchupEnabled()) return '';
+  const missed = missedDays();
+  if (!missed.length) return '';
+  const shown = missed.slice(-CATCHUP_MAX_SHOWN).reverse(); // les plus recents d'abord
+  const hidden = missed.length - shown.length;
+
+  const rows = shown.map((iso) => `
+    <div class="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-4 py-3">
+      <span class="text-sm text-slate-700 capitalize">${frDate(iso)}</span>
+      <button data-catchup="${iso}" class="catchup-day px-3 py-1.5 rounded-lg bg-gradient-to-r from-accent to-accent2 text-white text-xs font-semibold active:scale-95 transition-transform">
+        Rattraper
+      </button>
+    </div>`).join('');
+
+  return `
+    <div class="mt-6 bg-amber-50 rounded-2xl p-4 border border-amber-100">
+      <div class="flex items-center justify-between">
+        <p class="text-xs uppercase tracking-wider text-amber-600 font-bold">Rattrapage</p>
+        <span class="text-xs font-semibold text-amber-600">${missed.length} jour${missed.length > 1 ? 's' : ''} manque${missed.length > 1 ? 's' : ''}</span>
+      </div>
+      <p class="mt-1 text-sm text-slate-600">Fais la mission d'un jour manque, puis valide-le ici : ta serie et ta progression sont reparees.</p>
+      <div class="mt-3 space-y-2">${rows}</div>
+      ${hidden > 0 ? `<p class="mt-2 text-xs text-slate-400 text-center">+ ${hidden} autre${hidden > 1 ? 's' : ''} jour${hidden > 1 ? 's' : ''} plus ancien${hidden > 1 ? 's' : ''}</p>` : ''}
+    </div>
+  `;
+}
+
+// =========================================================================
 // ONGLET 3 : PROGRES
 // =========================================================================
 function renderProgress() {
   document.getElementById('view-progress').innerHTML = `
     <div class="fade-up mt-2">
       ${weekSectionHtml()}
+      ${catchupSectionHtml()}
 
       <h3 class="font-display font-semibold text-lg mt-8 mb-3 text-slate-900">Evolution (30 jours)</h3>
       <div class="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm">
@@ -584,6 +657,10 @@ function renderProgress() {
         x: { ticks: { color: '#94a3b8', maxTicksLimit: 6 }, grid: { display: false } }
       }
     }
+  });
+
+  document.querySelectorAll('.catchup-day').forEach((b) => {
+    b.addEventListener('click', () => catchUpDay(b.dataset.catchup));
   });
 
   document.getElementById('resetBtn').addEventListener('click', () => {
@@ -730,6 +807,21 @@ function renderSettings() {
         </div>
       </div>
 
+      <!-- Options -->
+      <div class="mt-6 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+        <p class="font-display font-semibold text-slate-900">Options</p>
+        <div class="mt-3 flex items-center justify-between gap-3">
+          <div>
+            <p class="text-sm text-slate-700 font-medium">Rattrapage des jours manques</p>
+            <p class="text-xs text-slate-500 mt-0.5">Permet de valider apres coup un jour rate depuis l'onglet Progres.</p>
+          </div>
+          <button id="catchupToggle" role="switch" aria-checked="${catchupEnabled()}"
+            class="flex-shrink-0 relative w-12 h-7 rounded-full transition-colors ${catchupEnabled() ? 'bg-emerald-500' : 'bg-slate-300'}">
+            <span class="absolute top-0.5 ${catchupEnabled() ? 'left-[22px]' : 'left-0.5'} w-6 h-6 rounded-full bg-white shadow transition-all"></span>
+          </button>
+        </div>
+      </div>
+
       <p class="mt-6 text-center text-[11px] text-slate-400">Copilote de Parole · tes objectifs, ton rythme.</p>
     </div>
   `;
@@ -763,6 +855,13 @@ function renderSettings() {
   document.getElementById('tplBtn').addEventListener('click', downloadTemplate);
   const revertBtn = document.getElementById('revertBtn');
   if (revertBtn) revertBtn.addEventListener('click', revertProgram);
+
+  document.getElementById('catchupToggle').addEventListener('click', () => {
+    const next = !catchupEnabled();
+    setCatchupEnabled(next);
+    toast(next ? 'Rattrapage active.' : 'Rattrapage desactive.');
+    renderSettings();
+  });
 }
 
 function downloadTemplate() {
