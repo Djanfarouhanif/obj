@@ -2,23 +2,18 @@
 // CONFIG
 // =========================================================================
 const API = '/api';
-const POINTS_PER_MISSION = 0.2;
-const BASE_SCORE = 1.0;
-const MAX_SCORE = 10.0;
 
-// Contenu du programme (missions, themes, citations) charge depuis
-// program.json via l API — AUCUNE donnee codee en dur dans ce fichier.
-let MISSIONS = [];
-let THEMES = {};
-let CITATIONS = [];
+// Base de mots (words.json) : lemmes francais issus de Lexique 3.83.
+// Format compact : { w: [mots], t: [bitmask], s: [nb syllabes] }
+// bitmask : 1 = nom, 2 = verbe, 4 = adjectif, 8 = adverbe, 16 = mot courant
+let WORDS = null;
+const T_NOM = 1, T_VER = 2, T_ADJ = 4, T_ADV = 8, T_COURANT = 16;
 
 // =========================================================================
 // ETAT & API
 // =========================================================================
 let state = { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [], ideas: [] };
-let chart = null;
-let currentTab = 'today';
-let customProgram = false;
+let currentTab = 'words';
 
 function todayISO() { return fmt(new Date()); }
 function fmt(d) {
@@ -27,9 +22,7 @@ function fmt(d) {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
-function parseISO(s) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); }
 function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
-function daysBetween(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
 
 // --- Couche reseau bas niveau : distingue "hors-ligne" (fetch echoue) de "erreur serveur" ---
 async function apiFetch(path, opts) {
@@ -41,22 +34,14 @@ async function apiFetch(path, opts) {
 }
 
 function apiGet() { return apiFetch('/data'); }
-function apiTaskOn(date, task) {
-  return apiFetch('/progress', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, task }) });
-}
-function apiTaskOff(date, task) { return apiFetch('/progress/' + date + '/' + task, { method: 'DELETE' }); }
-function apiComplete(date) {
-  return apiFetch('/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }) });
-}
-function apiUncomplete(date) { return apiFetch('/completions/' + date, { method: 'DELETE' }); }
 function apiReset() {
-  // On reinitialise la progression mais on CONSERVE les phrases et les idees.
-  return apiFetch('/data', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: state.phrases, ideas: state.ideas }) });
+  // Efface tout : phrases et idees comprises.
+  return apiFetch('/data', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [], ideas: [] })
+  });
 }
-function apiSaveProgram(obj) {
-  return apiFetch('/program', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) });
-}
-function apiDeleteProgram() { return apiFetch('/program', { method: 'DELETE' }); }
 
 // --- Phrases / citations (lecture) ---
 function apiAddPhrase(id, text) {
@@ -76,92 +61,26 @@ function apiSetIdea(id, pct) {
 }
 function apiDeleteIdea(id) { return apiFetch('/ideas/' + encodeURIComponent(id), { method: 'DELETE' }); }
 
-async function apiDefaultProgram() {
-  // program.json : programme par defaut (fichier statique, dispo hors-ligne via le Service Worker)
-  const r = await fetch('./program.json');
-  if (!r.ok) throw new Error('GET program.json');
-  return r.json();
-}
-async function loadProgram() {
-  // 1) programme personnalise (importe) ? 2) sinon, programme par defaut
-  try {
-    const p = await apiFetch('/program');
-    customProgram = true;
-    return p;
-  } catch (e) { /* 404 ou hors-ligne : on retombe sur le defaut */ }
-  customProgram = false;
-  return apiDefaultProgram();
-}
-
-function applyProgram(p) {
-  MISSIONS = p.missions || [];
-  THEMES = p.themes || {};
-  if (Array.isArray(p.citations) && p.citations.length) CITATIONS = p.citations;
-}
-
-function validProgramClient(p) {
-  if (!p || typeof p !== 'object') return false;
-  if (!Array.isArray(p.missions) || p.missions.length === 0) return false;
-  return p.missions.every((m) =>
-    m && typeof m.titre === 'string' &&
-    Array.isArray(m.tasks) && m.tasks.length > 0 &&
-    m.tasks.every((t) => typeof t === 'string')
-  );
-}
-
 // =========================================================================
 // PERSISTANCE LOCALE & SYNCHRONISATION (offline-first)
 // =========================================================================
 const LS_STATE = 'cdp.state';
 const LS_QUEUE = 'cdp.queue';
-const LS_PROGRAM = 'cdp.program';
-const LS_CUSTOM = 'cdp.custom';
-const LS_CATCHUP = 'cdp.catchup';
+const LS_WORDOPTS = 'cdp.wordopts';
 
-// Preference locale : rattrapage des jours manques (active par defaut)
-function catchupEnabled() {
-  try { return localStorage.getItem(LS_CATCHUP) !== '0'; } catch (e) { return true; }
-}
-function setCatchupEnabled(on) {
-  try { localStorage.setItem(LS_CATCHUP, on ? '1' : '0'); } catch (e) {}
-}
 let queue = [];
 let flushing = false;
 
 function saveLocalState() { try { localStorage.setItem(LS_STATE, JSON.stringify(state)); } catch (e) {} }
 function loadLocalState() { try { const s = localStorage.getItem(LS_STATE); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
-function saveLocalProgram(p) {
-  try { localStorage.setItem(LS_PROGRAM, JSON.stringify(p)); localStorage.setItem(LS_CUSTOM, customProgram ? '1' : '0'); } catch (e) {}
-}
-function loadLocalProgram() { try { const p = localStorage.getItem(LS_PROGRAM); return p ? JSON.parse(p) : null; } catch (e) { return null; } }
 function loadQueue() { try { const q = localStorage.getItem(LS_QUEUE); queue = q ? JSON.parse(q) : []; } catch (e) { queue = []; } }
 function saveQueue() { try { localStorage.setItem(LS_QUEUE, JSON.stringify(queue)); } catch (e) {} }
 function enqueue(op) { queue.push(op); saveQueue(); }
 
-// Mutations locales (appliquees immediatement, meme hors-ligne)
-function addTaskLocal(date, i) {
-  if (!Array.isArray(state.progress[date])) state.progress[date] = [];
-  if (!state.progress[date].includes(i)) { state.progress[date].push(i); state.progress[date].sort((a, b) => a - b); }
-}
-function removeTaskLocal(date, i) {
-  const a = state.progress[date] || [];
-  const idx = a.indexOf(i);
-  if (idx > -1) a.splice(idx, 1);
-  if (a.length === 0) delete state.progress[date];
-}
-function addCompletionLocal(date) { if (!state.completions.includes(date)) { state.completions.push(date); state.completions.sort(); } }
-function removeCompletionLocal(date) { const idx = state.completions.indexOf(date); if (idx > -1) state.completions.splice(idx, 1); }
-
 // Envoie une operation au serveur
 function sendOp(op) {
   switch (op.type) {
-    case 'taskOn': return apiTaskOn(op.date, op.task);
-    case 'taskOff': return apiTaskOff(op.date, op.task);
-    case 'complete': return apiComplete(op.date);
-    case 'uncomplete': return apiUncomplete(op.date);
     case 'reset': return apiReset();
-    case 'putProgram': return apiSaveProgram(op.program);
-    case 'deleteProgram': return apiDeleteProgram();
     case 'addPhrase': return apiAddPhrase(op.id, op.text);
     case 'readPhrase': return apiReadPhrase(op.id, op.date);
     case 'deletePhrase': return apiDeletePhrase(op.id);
@@ -172,7 +91,362 @@ function sendOp(op) {
   }
 }
 
-// --- Idees : actions local-first ---
+// Pousse la file d'attente vers le serveur (envoi seulement, AUCUN "pull").
+// L'etat local reste la source de verite pendant la session.
+async function flushQueue() {
+  if (flushing) return;
+  if (!navigator.onLine) { updateSyncBadge(); return; }
+  flushing = true;
+  updateSyncBadge();
+  try {
+    while (queue.length) {
+      const op = queue[0];
+      try {
+        await sendOp(op);
+        queue.shift(); saveQueue();
+      } catch (e) {
+        if (e.offline) break;            // toujours hors-ligne : on garde la file pour plus tard
+        queue.shift(); saveQueue();      // erreur serveur (4xx) : on abandonne cet op pour ne pas bloquer
+      }
+    }
+  } finally {
+    flushing = false;
+    updateSyncBadge();
+  }
+}
+
+// Recupere l'etat du serveur et ECRASE le local. A n'appeler QU'au demarrage
+// et a la reconnexion — jamais apres une simple action.
+async function pullFromServer() {
+  if (!navigator.onLine || queue.length) return;
+  try {
+    state = await apiGet();
+    saveLocalState();
+    if (currentTab === 'lecture') renderLecture();
+    if (currentTab === 'ideas') renderIdeas();
+    if (currentTab === 'settings') renderSettings();
+  } catch (e) { /* hors-ligne : on garde l'etat local */ }
+}
+
+// Indicateur de synchronisation dans l'en-tete
+function updateSyncBadge() {
+  const el = document.getElementById('syncStatus');
+  if (!el) return;
+  if (!navigator.onLine) {
+    const n = queue.length;
+    el.textContent = n > 0 ? ('Hors-ligne · ' + n) : 'Hors-ligne';
+    el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-1 rounded-full';
+  } else {
+    el.textContent = 'En ligne';
+    el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full';
+  }
+}
+
+// =========================================================================
+// ONGLET 1 : GENERATEUR DE MOTS
+// =========================================================================
+const WORD_DEFAULTS = { count: 1, type: 0, minLen: 0, maxLen: 0, starts: '', ends: '', syll: 0, common: false };
+let wordOpts = { ...WORD_DEFAULTS };
+let matches = [];        // indices des mots correspondant aux filtres
+let drawn = [];          // indices des mots actuellement affiches
+let wordsBuilt = false;  // la coquille du generateur est-elle deja construite ?
+
+function loadWordOpts() {
+  try {
+    const raw = localStorage.getItem(LS_WORDOPTS);
+    if (raw) wordOpts = { ...WORD_DEFAULTS, ...JSON.parse(raw) };
+  } catch (e) {}
+}
+function saveWordOpts() { try { localStorage.setItem(LS_WORDOPTS, JSON.stringify(wordOpts)); } catch (e) {} }
+
+async function loadWords() {
+  const r = await fetch('./words.json');
+  if (!r.ok) throw new Error('words.json');
+  WORDS = await r.json();
+}
+
+// Enleve les accents : taper "e" trouve aussi "ecole" et "elephant"
+function deaccent(s) {
+  return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function typeLabel(t) {
+  const l = [];
+  if (t & T_NOM) l.push('nom');
+  if (t & T_VER) l.push('verbe');
+  if (t & T_ADJ) l.push('adjectif');
+  if (t & T_ADV) l.push('adverbe');
+  return l.join(' · ');
+}
+
+// Recalcule la liste des mots qui passent les filtres
+function computeMatches() {
+  matches = [];
+  if (!WORDS) return;
+  const { type, minLen, maxLen, syll, common } = wordOpts;
+  const st = deaccent(wordOpts.starts.trim());
+  const en = deaccent(wordOpts.ends.trim());
+  const n = WORDS.w.length;
+  for (let i = 0; i < n; i++) {
+    const t = WORDS.t[i];
+    if (type && !(t & type)) continue;
+    if (common && !(t & T_COURANT)) continue;
+    const w = WORDS.w[i];
+    if (minLen && w.length < minLen) continue;
+    if (maxLen && w.length > maxLen) continue;
+    if (syll) {
+      const s = WORDS.s[i];
+      if (syll === 5 ? s < 5 : s !== syll) continue;
+    }
+    if (st || en) {
+      const d = deaccent(w);
+      if (st && !d.startsWith(st)) continue;
+      if (en && !d.endsWith(en)) continue;
+    }
+    matches.push(i);
+  }
+}
+
+// Tire `count` mots distincts au hasard parmi les correspondances
+function drawWords() {
+  const k = Math.min(wordOpts.count, matches.length);
+  const pool = matches.slice();
+  drawn = [];
+  for (let i = 0; i < k; i++) {
+    const j = Math.floor(Math.random() * pool.length);
+    drawn.push(pool[j]);
+    pool.splice(j, 1);
+  }
+}
+
+function wordCardsHtml() {
+  if (!WORDS) {
+    return '<p class="text-center text-slate-400 py-10 text-sm">Chargement des mots…</p>';
+  }
+  if (!matches.length) {
+    return '<p class="text-center text-slate-400 py-10 text-sm">Aucun mot ne correspond a ces filtres.<br>Assouplis-les puis reessaie.</p>';
+  }
+  if (!drawn.length) {
+    return '<p class="text-center text-slate-400 py-10 text-sm">Appuie sur <span class="font-semibold text-accent2">Generer</span> pour tirer un mot au hasard.</p>';
+  }
+  const big = drawn.length === 1;
+  return `<div class="${big ? '' : 'grid grid-cols-2 gap-2'}">` + drawn.map((i) => {
+    const w = WORDS.w[i], s = WORDS.s[i];
+    return `
+      <button data-word="${escapeHtml(w)}" class="word-card w-full text-center rounded-2xl border border-emerald-100 bg-emerald-50 ${big ? 'py-8 px-4' : 'py-4 px-2'} active:scale-95 transition-transform">
+        <span class="block font-display font-bold text-slate-900 break-words ${big ? 'text-4xl' : 'text-lg'}">${escapeHtml(w)}</span>
+        <span class="block mt-2 text-[11px] text-accent2">${typeLabel(WORDS.t[i])} · ${s} syllabe${s > 1 ? 's' : ''}</span>
+      </button>`;
+  }).join('') + '</div>';
+}
+
+// Met a jour uniquement les parties dynamiques : on ne reconstruit pas les
+// champs de filtre, donc on ne perd jamais le focus pendant la saisie.
+function refreshWords() {
+  const res = document.getElementById('wordResults');
+  if (res) res.innerHTML = wordCardsHtml();
+  const cnt = document.getElementById('matchCount');
+  if (cnt) {
+    cnt.textContent = WORDS
+      ? matches.length.toLocaleString('fr-FR') + ' mot' + (matches.length > 1 ? 's' : '') + ' disponible' + (matches.length > 1 ? 's' : '')
+      : 'chargement…';
+  }
+  const copyBtn = document.getElementById('copyWordsBtn');
+  if (copyBtn) copyBtn.classList.toggle('hidden', drawn.length === 0);
+  document.querySelectorAll('.word-card').forEach((b) => {
+    b.addEventListener('click', () => copyText(b.dataset.word, 'Mot copie : ' + b.dataset.word));
+  });
+}
+
+async function copyText(text, msg) {
+  try { await navigator.clipboard.writeText(text); toast(msg); }
+  catch (e) { toast('Copie impossible sur cet appareil.'); }
+}
+
+const TYPE_CHOICES = [
+  { v: 0, label: 'Tous' },
+  { v: T_NOM, label: 'Nom' },
+  { v: T_VER, label: 'Verbe' },
+  { v: T_ADJ, label: 'Adjectif' },
+  { v: T_ADV, label: 'Adverbe' }
+];
+const SYLL_CHOICES = [
+  { v: 0, label: 'Toutes' }, { v: 1, label: '1' }, { v: 2, label: '2' },
+  { v: 3, label: '3' }, { v: 4, label: '4' }, { v: 5, label: '5+' }
+];
+
+function chipsHtml(name, choices, current) {
+  return choices.map((c) => `
+    <button data-${name}="${c.v}" class="${name}-chip flex-shrink-0 px-3 py-1.5 rounded-full text-sm border transition-colors
+      ${c.v === current ? 'bg-accent2 border-accent2 text-white font-semibold' : 'bg-white border-slate-200 text-slate-600'}">${c.label}</button>`).join('');
+}
+
+function renderWords() {
+  if (wordsBuilt) { refreshWords(); return; }
+  wordsBuilt = true;
+
+  document.getElementById('view-words').innerHTML = `
+    <div class="fade-up mt-2">
+
+      <div id="wordResults" class="min-h-[9rem]">${wordCardsHtml()}</div>
+
+      <button id="generateBtn" class="mt-4 w-full py-4 rounded-2xl bg-gradient-to-r from-accent to-accent2 text-white font-display font-bold text-lg active:scale-95 transition-transform">
+        Generer 🎲
+      </button>
+      <button id="copyWordsBtn" class="mt-2 w-full py-2 rounded-xl border border-slate-200 text-slate-500 text-sm hidden">Copier</button>
+
+      <div class="mt-6 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+        <div class="flex items-center justify-between">
+          <p class="font-display font-semibold text-slate-900">Nombre de mots</p>
+          <div class="flex items-center gap-3">
+            <button id="countMinus" class="w-9 h-9 rounded-full border border-slate-200 text-slate-600 text-xl leading-none active:bg-slate-50" aria-label="Moins">&minus;</button>
+            <span id="countValue" class="font-display font-bold text-xl w-8 text-center text-accent2">${wordOpts.count}</span>
+            <button id="countPlus" class="w-9 h-9 rounded-full border border-slate-200 text-slate-600 text-xl leading-none active:bg-slate-50" aria-label="Plus">+</button>
+          </div>
+        </div>
+
+        <p class="mt-4 text-xs uppercase tracking-wider text-slate-400 font-bold">Type de mot</p>
+        <div id="typeChips" class="mt-2 flex gap-2 overflow-x-auto no-scrollbar"></div>
+
+        <p class="mt-4 text-xs uppercase tracking-wider text-slate-400 font-bold">Syllabes</p>
+        <div id="syllChips" class="mt-2 flex gap-2 overflow-x-auto no-scrollbar"></div>
+
+        <details class="mt-4">
+          <summary class="text-sm text-slate-500 cursor-pointer select-none">Filtres avances</summary>
+
+          <div class="mt-3 grid grid-cols-2 gap-3">
+            <label class="block">
+              <span class="text-xs text-slate-500">Commence par</span>
+              <input id="startsInput" type="text" maxlength="6" value="${escapeHtml(wordOpts.starts)}" placeholder="ex : bo"
+                class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:border-accent" />
+            </label>
+            <label class="block">
+              <span class="text-xs text-slate-500">Finit par</span>
+              <input id="endsInput" type="text" maxlength="6" value="${escapeHtml(wordOpts.ends)}" placeholder="ex : tion"
+                class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:border-accent" />
+            </label>
+            <label class="block">
+              <span class="text-xs text-slate-500">Lettres min.</span>
+              <input id="minLenInput" type="number" min="2" max="20" value="${wordOpts.minLen || ''}" placeholder="—"
+                class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:border-accent" />
+            </label>
+            <label class="block">
+              <span class="text-xs text-slate-500">Lettres max.</span>
+              <input id="maxLenInput" type="number" min="2" max="20" value="${wordOpts.maxLen || ''}" placeholder="—"
+                class="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:border-accent" />
+            </label>
+          </div>
+
+          <div class="mt-4 flex items-center justify-between gap-3">
+            <div>
+              <p class="text-sm text-slate-700 font-medium">Mots courants seulement</p>
+              <p class="text-xs text-slate-500 mt-0.5">Ecarte les mots rares et techniques.</p>
+            </div>
+            <button id="commonToggle" role="switch" aria-checked="${wordOpts.common}"
+              class="flex-shrink-0 relative w-12 h-7 rounded-full transition-colors ${wordOpts.common ? 'bg-emerald-500' : 'bg-slate-300'}">
+              <span class="absolute top-0.5 ${wordOpts.common ? 'left-[22px]' : 'left-0.5'} w-6 h-6 rounded-full bg-white shadow transition-all"></span>
+            </button>
+          </div>
+
+          <button id="resetFiltersBtn" class="mt-4 text-xs text-slate-400 underline">Reinitialiser les filtres</button>
+        </details>
+
+        <p class="mt-4 text-center text-xs text-slate-400"><span id="matchCount">…</span></p>
+      </div>
+
+    </div>
+  `;
+
+  document.getElementById('generateBtn').addEventListener('click', () => {
+    if (!WORDS) return;
+    drawWords();
+    refreshWords();
+  });
+  document.getElementById('copyWordsBtn').addEventListener('click', () => {
+    copyText(drawn.map((i) => WORDS.w[i]).join(', '), 'Mots copies !');
+  });
+
+  const setCount = (n) => {
+    wordOpts.count = Math.max(1, Math.min(20, n));
+    document.getElementById('countValue').textContent = wordOpts.count;
+    saveWordOpts();
+  };
+  document.getElementById('countMinus').addEventListener('click', () => setCount(wordOpts.count - 1));
+  document.getElementById('countPlus').addEventListener('click', () => setCount(wordOpts.count + 1));
+
+  // Les "chips" sont redessinees a chaque choix : on redessine puis on rebranche.
+  const paintChips = (name, choices) => {
+    const box = document.getElementById(name + 'Chips');
+    box.innerHTML = chipsHtml(name, choices, wordOpts[name]);
+    box.querySelectorAll('.' + name + '-chip').forEach((b) => {
+      b.addEventListener('click', () => {
+        wordOpts[name] = Number(b.dataset[name]);
+        saveWordOpts();
+        paintChips(name, choices);
+        onFilterChange();
+      });
+    });
+  };
+  paintChips('type', TYPE_CHOICES);
+  paintChips('syll', SYLL_CHOICES);
+
+  const bindText = (id, key) => {
+    document.getElementById(id).addEventListener('input', (e) => {
+      wordOpts[key] = e.target.value;
+      saveWordOpts();
+      onFilterChange();
+    });
+  };
+  bindText('startsInput', 'starts');
+  bindText('endsInput', 'ends');
+
+  const bindNum = (id, key) => {
+    document.getElementById(id).addEventListener('input', (e) => {
+      const v = parseInt(e.target.value, 10);
+      wordOpts[key] = Number.isFinite(v) ? Math.max(0, Math.min(20, v)) : 0;
+      saveWordOpts();
+      onFilterChange();
+    });
+  };
+  bindNum('minLenInput', 'minLen');
+  bindNum('maxLenInput', 'maxLen');
+
+  document.getElementById('commonToggle').addEventListener('click', (e) => {
+    wordOpts.common = !wordOpts.common;
+    saveWordOpts();
+    const btn = e.currentTarget;
+    btn.setAttribute('aria-checked', String(wordOpts.common));
+    btn.className = `flex-shrink-0 relative w-12 h-7 rounded-full transition-colors ${wordOpts.common ? 'bg-emerald-500' : 'bg-slate-300'}`;
+    btn.querySelector('span').className = `absolute top-0.5 ${wordOpts.common ? 'left-[22px]' : 'left-0.5'} w-6 h-6 rounded-full bg-white shadow transition-all`;
+    onFilterChange();
+  });
+
+  document.getElementById('resetFiltersBtn').addEventListener('click', () => {
+    wordOpts = { ...WORD_DEFAULTS };
+    saveWordOpts();
+    wordsBuilt = false;
+    renderWords();
+    toast('Filtres reinitialises.');
+  });
+
+  onFilterChange();
+}
+
+// Un filtre a change : on recalcule les correspondances et on vide le tirage.
+function onFilterChange() {
+  computeMatches();
+  drawn = [];
+  refreshWords();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// =========================================================================
+// IDEES : actions local-first
+// =========================================================================
 const IDEA_STEP = 10; // +10% par clic
 
 function ideaColor(pct) {
@@ -224,7 +498,9 @@ function deleteIdea(id) {
   flushQueue();
 }
 
-// --- Lecture : actions local-first ---
+// =========================================================================
+// LECTURE : actions local-first
+// =========================================================================
 function phraseTotal(ph) { return Object.values(ph.reads || {}).reduce((a, b) => a + b, 0); }
 function phraseToday(ph) { return (ph.reads || {})[todayISO()] || 0; }
 
@@ -260,623 +536,8 @@ function deletePhrase(id) {
   flushQueue();
 }
 
-// Pousse la file d'attente vers le serveur (envoi seulement, AUCUN "pull").
-// L'etat local reste la source de verite pendant la session : on ne le réécrit
-// jamais depuis le serveur ici (sinon une action en cours pourrait etre annulee).
-async function flushQueue() {
-  if (flushing) return;
-  if (!navigator.onLine) { updateSyncBadge(); return; }
-  flushing = true;
-  updateSyncBadge();
-  try {
-    // La boucle re-verifie queue.length a chaque tour : les ops ajoutees
-    // pendant un envoi (ex. plusieurs clics rapides) sont aussi traitees ici.
-    while (queue.length) {
-      const op = queue[0];
-      try {
-        await sendOp(op);
-        queue.shift(); saveQueue();
-      } catch (e) {
-        if (e.offline) break;            // toujours hors-ligne : on garde la file pour plus tard
-        queue.shift(); saveQueue();      // erreur serveur (4xx) : on abandonne cet op pour ne pas bloquer
-      }
-    }
-  } finally {
-    flushing = false;
-    updateSyncBadge();
-  }
-}
-
-// Recupere l'etat du serveur et ECRASE le local. A n'appeler QU'au demarrage
-// et a la reconnexion — jamais apres une simple action.
-// Garde-fou : si des changements locaux sont encore en file, on ne tire pas
-// (sinon on ecraserait des actions non encore synchronisees).
-async function pullFromServer() {
-  if (!navigator.onLine || queue.length) return;
-  try {
-    const data = await apiGet();
-    state = data; saveLocalState();
-    const prog = await loadProgram();
-    applyProgram(prog); saveLocalProgram(prog);
-    renderAll();
-    if (currentTab === 'settings') renderSettings();
-  } catch (e) { /* hors-ligne : on garde l'etat local */ }
-}
-
-// Indicateur de synchronisation dans l'en-tete
-function updateSyncBadge() {
-  const el = document.getElementById('syncStatus');
-  if (!el) return;
-  if (!navigator.onLine) {
-    // Hors-ligne : on indique le nombre de changements en attente de synchro.
-    const n = queue.length;
-    el.textContent = n > 0 ? ('Hors-ligne · ' + n) : 'Hors-ligne';
-    el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-1 rounded-full';
-  } else {
-    // En ligne : la synchro est automatique et silencieuse (pas de clignotement a chaque action).
-    el.textContent = 'En ligne';
-    el.className = 'ml-auto text-[10px] font-semibold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full';
-  }
-}
-
 // =========================================================================
-// CALCULS DERIVES
-// =========================================================================
-function nbDone() { return state.completions.length; }
-function score() { return Math.min(BASE_SCORE + POINTS_PER_MISSION * nbDone(), MAX_SCORE); }
-
-// mission "du jour" = nb de journees completees AVANT aujourd'hui (stable apres validation)
-function todaysMissionIndex() {
-  const t = todayISO();
-  const before = state.completions.filter((d) => d < t).length;
-  return Math.min(before, MISSIONS.length - 1);
-}
-
-function todayChecks() { return state.progress[todayISO()] || []; }
-function isTaskDone(i) { return todayChecks().includes(i); }
-function allTasksDone(mission) { return mission.tasks.every((_, i) => isTaskDone(i)); }
-function isDayComplete() { return state.completions.includes(todayISO()); }
-
-function streak() {
-  if (!state.completions.length) return 0;
-  const set = new Set(state.completions);
-  let cursor;
-  if (set.has(todayISO())) cursor = new Date();
-  else if (set.has(fmt(addDays(new Date(), -1)))) cursor = addDays(new Date(), -1);
-  else return 0;
-  let count = 0;
-  while (set.has(fmt(cursor))) { count++; cursor = addDays(cursor, -1); }
-  return count;
-}
-
-// Jours manques : dates entre startDate et hier, jamais validees
-function missedDays() {
-  const days = [];
-  const yesterday = fmt(addDays(new Date(), -1));
-  const set = new Set(state.completions);
-  let cursor = parseISO(state.startDate);
-  while (fmt(cursor) <= yesterday) {
-    const iso = fmt(cursor);
-    if (!set.has(iso)) days.push(iso);
-    cursor = addDays(cursor, 1);
-  }
-  return days;
-}
-
-function frDate(iso) {
-  return parseISO(iso).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-}
-
-// Rattrapage : valide retroactivement un jour manque (repare la serie et avance la mission)
-function catchUpDay(date) {
-  if (!confirm('Rattraper le ' + frDate(date) + ' ?\nCe jour sera compte comme valide dans ta progression.')) return;
-  addCompletionLocal(date);
-  enqueue({ type: 'complete', date });
-  saveLocalState();
-  toast('Jour rattrape ! 💪');
-  renderAll();
-  flushQueue();
-}
-
-function citationOfDay() {
-  if (!CITATIONS.length) return '';
-  const idx = Math.abs(daysBetween(state.startDate, todayISO())) % CITATIONS.length;
-  return CITATIONS[idx];
-}
-
-function curve30() {
-  const labels = [], data = [];
-  const today = new Date();
-  for (let i = 29; i >= 0; i--) {
-    const d = addDays(today, -i);
-    const iso = fmt(d);
-    const count = state.completions.filter((c) => c <= iso).length;
-    labels.push(d.getDate() + '/' + (d.getMonth() + 1));
-    data.push(Math.min(BASE_SCORE + POINTS_PER_MISSION * count, MAX_SCORE));
-  }
-  return { labels, data };
-}
-
-// =========================================================================
-// ONGLET 1 : AUJOURD'HUI
-// =========================================================================
-function renderToday() {
-  if (!MISSIONS.length) {
-    document.getElementById('view-today').innerHTML =
-      '<p class="text-center text-slate-400 py-20">Programme indisponible. Verifie le serveur puis recharge.</p>';
-    return;
-  }
-  const s = score();
-  const pct = ((s - BASE_SCORE) / (MAX_SCORE - BASE_SCORE)) * 100;
-  const m = MISSIONS[todaysMissionIndex()];
-  const dayNum = todaysMissionIndex() + 1;
-  const doneCount = m.tasks.filter((_, i) => isTaskDone(i)).length;
-  const total = m.tasks.length;
-  const complete = isDayComplete();
-
-  const R = 52, C = 2 * Math.PI * R;
-  const offset = C * (1 - pct / 100);
-
-  const tasksHtml = m.tasks.map((t, i) => {
-    const done = isTaskDone(i);
-    return `
-      <button data-task="${i}" class="task-row w-full flex items-start gap-3 text-left p-3 rounded-xl border transition-colors
-        ${done ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200 active:bg-slate-50'}">
-        <span class="mt-0.5 flex-shrink-0 w-6 h-6 rounded-md border-2 flex items-center justify-center transition-colors
-          ${done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 text-transparent'}">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-        </span>
-        <span class="text-[15px] leading-snug ${done ? 'text-emerald-700 line-through' : 'text-slate-700'}">${t}</span>
-      </button>`;
-  }).join('');
-
-  document.getElementById('view-today').innerHTML = `
-    <div class="fade-up flex flex-col items-center text-center mt-2">
-
-      <div class="relative w-40 h-40">
-        <svg class="w-40 h-40 -rotate-90" viewBox="0 0 120 120">
-          <circle cx="60" cy="60" r="${R}" fill="none" stroke-width="10" class="ring-track" />
-          <circle cx="60" cy="60" r="${R}" fill="none" stroke-width="10" class="ring-value"
-            stroke="url(#grad)" stroke-dasharray="${C}" stroke-dashoffset="${offset}" />
-          <defs><linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#0e9f6e" /><stop offset="100%" stop-color="#057a55" />
-          </linearGradient></defs>
-        </svg>
-        <div class="absolute inset-0 flex flex-col items-center justify-center">
-          <span class="text-[10px] uppercase tracking-widest text-slate-400">Niveau</span>
-          <span class="font-display text-4xl font-bold text-accent2">${s.toFixed(1)}</span>
-          <span class="text-xs text-slate-400">/ 10</span>
-        </div>
-      </div>
-
-      <p class="mt-3 text-sm text-slate-500">Jour ${dayNum} / ${MISSIONS.length} · ${m.phase}</p>
-
-      <div class="mt-5 w-full bg-emerald-50 rounded-2xl p-5 text-left border border-emerald-100">
-        <div class="flex items-center justify-between">
-          <p class="text-xs uppercase tracking-wider text-accent2 font-bold">Mission du jour</p>
-          <p class="text-xs font-semibold ${complete ? 'text-emerald-600' : 'text-slate-500'}">${doneCount}/${total} taches</p>
-        </div>
-        <h2 class="font-display text-2xl font-bold mt-1 text-slate-900">Mission ${dayNum} : ${m.titre}</h2>
-        <div class="mt-3 w-full h-2 bg-emerald-100 rounded-full overflow-hidden">
-          <div class="h-full bg-gradient-to-r from-accent to-accent2 transition-all duration-500" style="width:${(doneCount/total)*100}%"></div>
-        </div>
-      </div>
-
-      <div class="mt-4 w-full space-y-2">${tasksHtml}</div>
-
-      <div class="mt-5 w-full">
-        ${complete
-          ? `<div class="w-full py-4 rounded-2xl bg-emerald-600 text-white font-display font-bold text-lg pop">Journee accomplie ✓</div>
-             <button id="undoBtn" class="mt-3 text-xs text-slate-400 underline">Annuler la journee</button>`
-          : `<div class="w-full py-4 rounded-2xl bg-slate-100 text-slate-400 font-display font-bold text-sm">Coche les ${total} taches pour valider la journee</div>`}
-      </div>
-
-      <div class="mt-8 w-full border-t border-slate-100 pt-5">
-        <p class="text-sm italic text-slate-500 leading-relaxed">« ${citationOfDay()} »</p>
-      </div>
-    </div>
-  `;
-
-  document.querySelectorAll('.task-row').forEach((btn) => {
-    btn.addEventListener('click', () => toggleTask(Number(btn.dataset.task), m));
-  });
-  const undo = document.getElementById('undoBtn');
-  if (undo) undo.addEventListener('click', () => {
-    const date = todayISO();
-    removeCompletionLocal(date);
-    enqueue({ type: 'uncomplete', date });
-    saveLocalState();
-    renderAll();
-    flushQueue();
-  });
-}
-
-// Local-first : on applique l'action immediatement, puis on synchronise (ou on met en file si hors-ligne)
-function toggleTask(i, mission) {
-  const date = todayISO();
-  const wasComplete = isDayComplete();
-  if (isTaskDone(i)) {
-    removeTaskLocal(date, i);
-    enqueue({ type: 'taskOff', date, task: i });
-    if (wasComplete) { removeCompletionLocal(date); enqueue({ type: 'uncomplete', date }); }
-  } else {
-    addTaskLocal(date, i);
-    enqueue({ type: 'taskOn', date, task: i });
-    if (!wasComplete && allTasksDone(mission)) {
-      addCompletionLocal(date);
-      enqueue({ type: 'complete', date });
-      toast('Journee accomplie ! 🎉');
-    }
-  }
-  saveLocalState();
-  renderAll();
-  flushQueue();
-}
-
-// =========================================================================
-// Section SEMAINE (affichee dans l'onglet Progres)
-// =========================================================================
-function weekSectionHtml() {
-  if (!MISSIONS.length) return '';
-  const labels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-  const now = new Date();
-  const dow = (now.getDay() + 6) % 7;
-  const monday = addDays(now, -dow);
-  const todayIso = todayISO();
-  const set = new Set(state.completions);
-
-  let validated = 0, cells = '';
-  for (let i = 0; i < 7; i++) {
-    const d = addDays(monday, i);
-    const iso = fmt(d);
-    let icon, ring, missed = false;
-    if (set.has(iso)) { validated++; icon = '✅'; ring = 'border-emerald-200 bg-emerald-50'; }
-    else if (iso > todayIso) { icon = '❓'; ring = 'border-slate-200 bg-slate-50'; }
-    else if (iso === todayIso) { icon = '⚪️'; ring = 'border-accent bg-emerald-50'; }
-    else { missed = catchupEnabled(); icon = '🔴'; ring = missed ? 'border-red-200 bg-red-50 active:bg-red-100' : 'border-red-200 bg-red-50'; }
-    const inner = `
-        <span class="text-xs text-slate-400">${labels[i]}</span>
-        <span class="text-2xl">${icon}</span>
-        <span class="text-[10px] ${missed ? 'text-red-400 font-semibold' : 'text-slate-400'}">${missed ? 'rattraper' : d.getDate() + '/' + (d.getMonth() + 1)}</span>`;
-    cells += missed
-      ? `<button data-catchup="${iso}" class="catchup-day flex flex-col items-center gap-1 rounded-xl border ${ring} py-3 transition-colors">${inner}</button>`
-      : `<div class="flex flex-col items-center gap-1 rounded-xl border ${ring} py-3">${inner}</div>`;
-  }
-
-  const theme = THEMES[MISSIONS[todaysMissionIndex()].phase] || '—';
-
-  return `
-    <div class="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
-      <p class="text-xs uppercase tracking-wider text-accent2 font-bold">Theme de la semaine</p>
-      <h2 class="font-display text-2xl font-bold mt-1 text-slate-900">${theme}</h2>
-    </div>
-
-    <h3 class="font-display font-semibold text-lg mt-6 mb-3 text-slate-900">Semaine en cours</h3>
-    <div class="grid grid-cols-7 gap-2">${cells}</div>
-
-    <div class="mt-4 bg-white rounded-2xl p-5 border border-slate-200 text-center shadow-sm">
-      <p class="text-sm text-slate-500">Taux de reussite</p>
-      <p class="font-display text-3xl font-bold text-accent2 mt-1">${validated}/7 <span class="text-base text-slate-400">jours</span></p>
-    </div>
-  `;
-}
-
-// =========================================================================
-// Section RATTRAPAGE (affichee dans l'onglet Progres)
-// =========================================================================
-const CATCHUP_MAX_SHOWN = 10;
-
-function catchupSectionHtml() {
-  if (!catchupEnabled()) return '';
-  const missed = missedDays();
-  if (!missed.length) return '';
-  const shown = missed.slice(-CATCHUP_MAX_SHOWN).reverse(); // les plus recents d'abord
-  const hidden = missed.length - shown.length;
-
-  const rows = shown.map((iso) => `
-    <div class="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-4 py-3">
-      <span class="text-sm text-slate-700 capitalize">${frDate(iso)}</span>
-      <button data-catchup="${iso}" class="catchup-day px-3 py-1.5 rounded-lg bg-gradient-to-r from-accent to-accent2 text-white text-xs font-semibold active:scale-95 transition-transform">
-        Rattraper
-      </button>
-    </div>`).join('');
-
-  return `
-    <div class="mt-6 bg-amber-50 rounded-2xl p-4 border border-amber-100">
-      <div class="flex items-center justify-between">
-        <p class="text-xs uppercase tracking-wider text-amber-600 font-bold">Rattrapage</p>
-        <span class="text-xs font-semibold text-amber-600">${missed.length} jour${missed.length > 1 ? 's' : ''} manque${missed.length > 1 ? 's' : ''}</span>
-      </div>
-      <p class="mt-1 text-sm text-slate-600">Fais la mission d'un jour manque, puis valide-le ici : ta serie et ta progression sont reparees.</p>
-      <div class="mt-3 space-y-2">${rows}</div>
-      ${hidden > 0 ? `<p class="mt-2 text-xs text-slate-400 text-center">+ ${hidden} autre${hidden > 1 ? 's' : ''} jour${hidden > 1 ? 's' : ''} plus ancien${hidden > 1 ? 's' : ''}</p>` : ''}
-    </div>
-  `;
-}
-
-// =========================================================================
-// ONGLET 3 : PROGRES
-// =========================================================================
-function renderProgress() {
-  document.getElementById('view-progress').innerHTML = `
-    <div class="fade-up mt-2">
-      ${weekSectionHtml()}
-      ${catchupSectionHtml()}
-
-      <h3 class="font-display font-semibold text-lg mt-8 mb-3 text-slate-900">Evolution (30 jours)</h3>
-      <div class="bg-white rounded-2xl p-3 border border-slate-200 shadow-sm">
-        <canvas id="progressChart" height="200"></canvas>
-      </div>
-
-      <div class="grid grid-cols-2 gap-3 mt-5">
-        <div class="bg-white rounded-2xl p-4 border border-slate-200 text-center shadow-sm">
-          <p class="text-3xl">🔥</p>
-          <p class="font-display text-3xl font-bold text-accent2 mt-1">${streak()}</p>
-          <p class="text-xs text-slate-500 mt-1">Jours consecutifs</p>
-        </div>
-        <div class="bg-white rounded-2xl p-4 border border-slate-200 text-center shadow-sm">
-          <p class="text-3xl">🏆</p>
-          <p class="font-display text-3xl font-bold text-accent2 mt-1">${nbDone()}</p>
-          <p class="text-xs text-slate-500 mt-1">Journees reussies</p>
-        </div>
-      </div>
-
-      <div class="mt-6 text-center">
-        <p class="text-sm text-slate-500">Niveau actuel : <span class="text-accent2 font-semibold">${score().toFixed(1)} / 10</span></p>
-      </div>
-
-      <div class="mt-8 text-center">
-        <button id="resetBtn" class="text-xs text-slate-400 underline">Reinitialiser ma progression</button>
-      </div>
-    </div>
-  `;
-
-  const { labels, data } = curve30();
-  const ctx = document.getElementById('progressChart');
-  if (chart) chart.destroy();
-  chart = new Chart(ctx, {
-    type: 'line',
-    data: { labels, datasets: [{
-      label: 'Score', data,
-      borderColor: '#0e9f6e',
-      backgroundColor: (c) => {
-        const { ctx, chartArea } = c.chart;
-        if (!chartArea) return 'rgba(14,159,110,.12)';
-        const g = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-        g.addColorStop(0, 'rgba(14,159,110,.30)');
-        g.addColorStop(1, 'rgba(14,159,110,0)');
-        return g;
-      },
-      fill: true, tension: .35, pointRadius: 0, borderWidth: 2.5
-    }]},
-    options: {
-      responsive: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        y: { min: 1, max: 10, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(148,163,184,.12)' } },
-        x: { ticks: { color: '#94a3b8', maxTicksLimit: 6 }, grid: { display: false } }
-      }
-    }
-  });
-
-  document.querySelectorAll('.catchup-day').forEach((b) => {
-    b.addEventListener('click', () => catchUpDay(b.dataset.catchup));
-  });
-
-  document.getElementById('resetBtn').addEventListener('click', () => {
-    if (!confirm('Reinitialiser toute ta progression ? (tes phrases et idees sont conservees)')) return;
-    state = { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: state.phrases || [], ideas: state.ideas || [] };
-    saveLocalState();
-    enqueue({ type: 'reset' });
-    toast('Progression reinitialisee.');
-    renderAll();
-    flushQueue();
-  });
-}
-
-async function importProgram(text) {
-  let obj;
-  try { obj = JSON.parse(text); }
-  catch (e) { toast('JSON invalide (erreur de syntaxe).'); return; }
-  if (!validProgramClient(obj)) {
-    toast('Format invalide : il faut "missions": [{ titre, tasks: [...] }].');
-    return;
-  }
-  // Local-first : on applique tout de suite, puis on synchronise
-  customProgram = true;
-  applyProgram(obj);
-  saveLocalProgram(obj);
-  enqueue({ type: 'putProgram', program: obj });
-  toast('Objectifs importes ! ' + obj.missions.length + ' jours.');
-  renderAll();
-  renderSettings();
-  flushQueue();
-}
-
-async function revertProgram() {
-  if (!confirm('Revenir au programme par defaut ? Ton programme importe sera supprime (ta progression est conservee).')) return;
-  try {
-    customProgram = false;
-    const def = await apiDefaultProgram(); // dispo hors-ligne via le Service Worker
-    applyProgram(def);
-    saveLocalProgram(def);
-    enqueue({ type: 'deleteProgram' });
-    toast('Programme par defaut restaure.');
-    renderAll();
-    renderSettings();
-    flushQueue();
-  } catch (e) { toast('Erreur reseau.'); }
-}
-
-// =========================================================================
-// ONGLET 4 : PARAMETRES (generateur IA + import)
-// =========================================================================
-const AI_PROMPT = `Tu es un coach/mentor expert capable de batir un programme d'entrainement progressif pour N'IMPORTE QUEL objectif personnel : apprendre une nouvelle competence, une langue, un instrument de musique, le code, le dessin, le sport, la cuisine, la prise de parole, une habitude... bref, tout ce que je veux apprendre ou ameliorer.
-
-Aide-moi a construire ce programme jour par jour. Je vais l'importer dans mon application de suivi d'objectifs.
-
-ETAPE 1 - INTERVIEW (REGLE ABSOLUE : UNE SEULE QUESTION A LA FOIS)
-Pose-moi les questions ci-dessous, mais STRICTEMENT une par message.
-Regles imperatives, sans exception :
-- Pose UNE seule question, puis ARRETE-TOI et attends ma reponse.
-- NE passe JAMAIS a la question suivante tant que je n'ai pas repondu a la question en cours.
-- Ne regroupe jamais plusieurs questions dans le meme message. Ne saute aucune question.
-- Si ma reponse est vague ou incomplete, reformule/repose la MEME question avant d'avancer.
-- Ne commence l'ETAPE 2 (le JSON) que lorsque j'ai repondu a TOUTES les questions.
-- Numerote chaque question (ex : "Question 1/5").
-
-Questions a poser, dans cet ordre :
-1. Quel est mon objectif precis ? (ce que je veux apprendre ou atteindre)
-2. Mon niveau actuel sur cet objectif (grand debutant, debutant, intermediaire, avance)
-3. Le temps dont je dispose chaque jour
-4. La duree du programme souhaitee (nombre de jours, ex : 30)
-5. Mon contexte, mes contraintes, mes blocages ou motivations
-
-ETAPE 2 - GENERATION DU FICHIER JSON
-Quand tu as assez d'infos, genere un VRAI FICHIER telechargeable nomme "mes-objectifs.json" (pas seulement du texte dans la conversation : cree un fichier que je peux telecharger). Son contenu doit etre un JSON valide respectant EXACTEMENT ce format :
-
-{
-  "themes": { "Nom de la phase": "Titre de l'etape" },
-  "citations": ["citation motivante 1", "citation motivante 2"],
-  "missions": [
-    {
-      "titre": "Titre court de la mission du jour",
-      "phase": "Nom de la phase (doit aussi exister dans themes)",
-      "tasks": ["tache concrete 1", "tache concrete 2", "tache concrete 3"]
-    }
-  ]
-}
-
-REGLES STRICTES :
-- "missions" : un objet par jour, du plus facile au plus difficile (vraie progression vers l'objectif).
-- Le nombre de missions = le nombre de jours demande.
-- Chaque mission a 3 a 5 "tasks" : des actions concretes, mesurables, faisables dans la journee.
-- Chaque "phase" utilisee dans une mission doit etre une cle de "themes".
-- "citations" : des phrases motivantes adaptees a mon objectif.
-- Le JSON doit etre valide (guillemets droits, pas de virgule finale) et adapte a MON objectif precis.
-- Ecris tout en francais, ton motivant et bienveillant.
-- Donne-moi le fichier "mes-objectifs.json" a telecharger, puis rappelle-moi de l'importer dans l'app via l'onglet Parametres. Si tu ne peux pas creer de fichier telechargeable, alors affiche UNIQUEMENT le JSON dans un bloc de code, sans aucun autre texte, pour que je puisse l'enregistrer en .json moi-meme.`;
-
-function renderSettings() {
-  document.getElementById('view-settings').innerHTML = `
-    <div class="fade-up mt-2">
-
-      <!-- Generateur IA -->
-      <div class="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
-        <p class="text-xs uppercase tracking-wider text-accent2 font-bold">Generer mes objectifs avec une IA</p>
-        <h2 class="font-display text-xl font-bold mt-1 text-slate-900">Assistant de creation</h2>
-        <p class="mt-1 text-sm text-slate-600">Pour <span class="font-semibold">n'importe quel objectif</span> : apprendre une langue, un instrument, le sport, une competence...</p>
-        <ol class="mt-3 text-sm text-slate-600 space-y-1 list-decimal list-inside">
-          <li>Copie le prompt ci-dessous.</li>
-          <li>Colle-le dans une IA (ChatGPT, Claude, Gemini...).</li>
-          <li>Reponds a ses questions.</li>
-          <li>Telecharge le fichier <span class="font-mono text-accent2">mes-objectifs.json</span> qu'elle genere.</li>
-          <li>Importe ce fichier juste en dessous.</li>
-        </ol>
-        <textarea id="aiPrompt" readonly rows="12"
-          class="mt-3 w-full text-xs font-mono p-3 rounded-lg border border-emerald-200 bg-white text-slate-700 leading-relaxed"></textarea>
-        <button id="copyPromptBtn" class="mt-2 w-full py-3 rounded-xl bg-gradient-to-r from-accent to-accent2 text-white font-semibold text-sm active:scale-95 transition-transform">
-          Copier le prompt
-        </button>
-      </div>
-
-      <!-- Import des objectifs -->
-      <div class="mt-6 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-        <p class="font-display font-semibold text-slate-900">Importer mes objectifs</p>
-        <p class="text-xs text-slate-500 mt-1">
-          Programme actuel :
-          <span class="font-semibold ${customProgram ? 'text-accent2' : 'text-slate-600'}">${customProgram ? 'personnalise' : 'par defaut'}</span>
-          · ${MISSIONS.length} jours
-        </p>
-
-        <input type="file" id="importFile" accept="application/json,.json" class="hidden" />
-        <button id="pickFileBtn" class="mt-3 w-full py-3 rounded-xl bg-slate-800 text-white font-semibold text-sm active:scale-95 transition-transform">
-          Importer un fichier JSON
-        </button>
-
-        <details class="mt-3 group">
-          <summary class="text-xs text-slate-500 cursor-pointer select-none">… ou coller le JSON</summary>
-          <textarea id="pasteJson" rows="5" placeholder='{ "missions": [ { "titre": "...", "phase": "...", "tasks": ["..."] } ] }'
-            class="mt-2 w-full text-xs font-mono p-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-700"></textarea>
-          <button id="pasteImportBtn" class="mt-2 w-full py-2 rounded-lg bg-slate-800 text-white text-sm">Importer ce texte</button>
-        </details>
-
-        <div class="mt-3 flex items-center justify-between text-xs">
-          <button id="tplBtn" class="text-slate-500 underline">Telecharger un modele</button>
-          ${customProgram ? '<button id="revertBtn" class="text-slate-500 underline">Revenir au defaut</button>' : ''}
-        </div>
-      </div>
-
-      <!-- Options -->
-      <div class="mt-6 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-        <p class="font-display font-semibold text-slate-900">Options</p>
-        <div class="mt-3 flex items-center justify-between gap-3">
-          <div>
-            <p class="text-sm text-slate-700 font-medium">Rattrapage des jours manques</p>
-            <p class="text-xs text-slate-500 mt-0.5">Permet de valider apres coup un jour rate depuis l'onglet Progres.</p>
-          </div>
-          <button id="catchupToggle" role="switch" aria-checked="${catchupEnabled()}"
-            class="flex-shrink-0 relative w-12 h-7 rounded-full transition-colors ${catchupEnabled() ? 'bg-emerald-500' : 'bg-slate-300'}">
-            <span class="absolute top-0.5 ${catchupEnabled() ? 'left-[22px]' : 'left-0.5'} w-6 h-6 rounded-full bg-white shadow transition-all"></span>
-          </button>
-        </div>
-      </div>
-
-      <p class="mt-6 text-center text-[11px] text-slate-400">Copilote de Parole · tes objectifs, ton rythme.</p>
-    </div>
-  `;
-
-  document.getElementById('aiPrompt').value = AI_PROMPT;
-
-  document.getElementById('copyPromptBtn').addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(AI_PROMPT);
-      toast('Prompt copie ! Colle-le dans ton IA.');
-    } catch (e) {
-      // repli si clipboard indisponible
-      const ta = document.getElementById('aiPrompt');
-      ta.focus(); ta.select();
-      toast('Selectionne et copie le texte (Ctrl/Cmd + C).');
-    }
-  });
-
-  const fileInput = document.getElementById('importFile');
-  document.getElementById('pickFileBtn').addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', async () => {
-    const f = fileInput.files[0];
-    if (!f) return;
-    const text = await f.text();
-    fileInput.value = '';
-    importProgram(text);
-  });
-  document.getElementById('pasteImportBtn').addEventListener('click', () => {
-    importProgram(document.getElementById('pasteJson').value);
-  });
-  document.getElementById('tplBtn').addEventListener('click', downloadTemplate);
-  const revertBtn = document.getElementById('revertBtn');
-  if (revertBtn) revertBtn.addEventListener('click', revertProgram);
-
-  document.getElementById('catchupToggle').addEventListener('click', () => {
-    const next = !catchupEnabled();
-    setCatchupEnabled(next);
-    toast(next ? 'Rattrapage active.' : 'Rattrapage desactive.');
-    renderSettings();
-  });
-}
-
-function downloadTemplate() {
-  const data = JSON.stringify({ themes: THEMES, citations: CITATIONS, missions: MISSIONS }, null, 2);
-  const blob = new Blob([data], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'mes-objectifs.json';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// =========================================================================
-// ONGLET 5 : LECTURE (phrases / citations + courbe d'evolution)
+// ONGLET : LECTURE (phrases / citations + courbe d'evolution)
 // =========================================================================
 
 // Courbe cumulee des lectures sur `days` jours (SVG inline, etire en largeur).
@@ -971,11 +632,6 @@ function renderLecture() {
   });
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 // =========================================================================
 // ONGLET : IDEES (notes avec pourcentage de progression)
 // =========================================================================
@@ -1012,7 +668,7 @@ function renderIdeas() {
       <p class="text-sm text-slate-500 mt-1">Note tes idees, puis tape dessus pour faire monter leur avancement.</p>
 
       <div class="mt-4 flex gap-2">
-        <input id="ideaInput" type="text" maxlength="2000" placeholder="Note une idee, une tache, une pensee…"
+        <input id="ideaInput" type="text" maxlength="2000" placeholder="Note une idee, une pensee…"
           class="flex-1 px-3 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 focus:outline-none focus:border-accent" />
         <button id="addIdeaBtn" class="px-4 rounded-xl bg-gradient-to-r from-accent to-accent2 text-white font-semibold text-sm active:scale-95 transition-transform">Ajouter</button>
       </div>
@@ -1039,17 +695,50 @@ function renderIdeas() {
 }
 
 // =========================================================================
+// ONGLET : PARAMETRES
+// =========================================================================
+function renderSettings() {
+  const nbWords = WORDS ? WORDS.w.length.toLocaleString('fr-FR') : '…';
+  document.getElementById('view-settings').innerHTML = `
+    <div class="fade-up mt-2">
+
+      <div class="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
+        <p class="text-xs uppercase tracking-wider text-accent2 font-bold">Base de mots</p>
+        <h2 class="font-display text-xl font-bold mt-1 text-slate-900">${nbWords} mots francais</h2>
+        <p class="mt-1 text-sm text-slate-600">Noms, verbes, adjectifs et adverbes, disponibles hors-ligne. Source : Lexique 3.83 (lexique.org).</p>
+      </div>
+
+      <div class="mt-6 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+        <p class="font-display font-semibold text-slate-900">Mes donnees</p>
+        <p class="text-xs text-slate-500 mt-1">${(state.phrases || []).length} phrase(s) · ${(state.ideas || []).length} idee(s)</p>
+        <button id="resetDataBtn" class="mt-3 w-full py-3 rounded-xl bg-slate-800 text-white font-semibold text-sm active:scale-95 transition-transform">
+          Effacer toutes mes donnees
+        </button>
+      </div>
+
+      <p class="mt-6 text-center text-[11px] text-slate-400">Copilote de Parole · ta voix, ton rythme.</p>
+    </div>
+  `;
+
+  document.getElementById('resetDataBtn').addEventListener('click', () => {
+    if (!confirm('Effacer toutes tes phrases et toutes tes idees ? Cette action est definitive.')) return;
+    state = { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [], ideas: [] };
+    saveLocalState();
+    enqueue({ type: 'reset' });
+    toast('Donnees effacees.');
+    renderSettings();
+    flushQueue();
+  });
+}
+
+// =========================================================================
 // NAVIGATION
 // =========================================================================
-function renderAll() {
-  renderToday();
-  if (currentTab === 'progress') renderProgress();
-  if (currentTab === 'lecture') renderLecture();
-  if (currentTab === 'ideas') renderIdeas();
-}
+const TABS = ['words', 'lecture', 'ideas', 'settings'];
+
 function switchTab(tab) {
   currentTab = tab;
-  ['today', 'progress', 'lecture', 'ideas', 'settings'].forEach((t) => {
+  TABS.forEach((t) => {
     document.getElementById('view-' + t).classList.toggle('hidden', t !== tab);
   });
   document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -1057,11 +746,12 @@ function switchTab(tab) {
     b.classList.toggle('text-accent2', active);
     b.classList.toggle('text-slate-400', !active);
   });
-  if (tab === 'progress') renderProgress();
+  if (tab === 'words') renderWords();
   if (tab === 'lecture') renderLecture();
   if (tab === 'ideas') renderIdeas();
   if (tab === 'settings') renderSettings();
 }
+
 function toast(msg) {
   const t = document.getElementById('toast');
   t.querySelector('div').textContent = msg;
@@ -1080,19 +770,25 @@ async function init() {
 
   // 1) Affichage immediat depuis le cache local (fonctionne hors-ligne)
   loadQueue();
+  loadWordOpts();
   const ls = loadLocalState();
   if (ls) state = ls;
-  const lp = loadLocalProgram();
-  if (lp) {
-    try { customProgram = localStorage.getItem(LS_CUSTOM) === '1'; } catch (e) {}
-    applyProgram(lp);
-  }
   document.getElementById('loader').remove();
-  renderToday();
-  switchTab('today');
+  switchTab('words');
   updateSyncBadge();
 
-  // 2) Au demarrage si en ligne : on envoie d'abord la file en attente,
+  // 2) Base de mots (fichier statique, mis en cache par le Service Worker)
+  try {
+    await loadWords();
+    computeMatches();
+    drawWords();          // un premier mot des l'ouverture
+    refreshWords();
+  } catch (e) {
+    const res = document.getElementById('wordResults');
+    if (res) res.innerHTML = '<p class="text-center text-slate-400 py-10 text-sm">Base de mots indisponible. Recharge la page une fois en ligne.</p>';
+  }
+
+  // 3) Au demarrage si en ligne : on envoie d'abord la file en attente,
   //    PUIS on tire l'etat du serveur (resync complet).
   if (navigator.onLine) {
     await flushQueue();
@@ -1100,8 +796,7 @@ async function init() {
     updateSyncBadge();
   }
 
-  // 3) A la reconnexion (hors-ligne -> en ligne) : meme sequence.
-  //    C'est le SEUL moment, avec le demarrage, ou l'on resynchronise depuis le serveur.
+  // 4) A la reconnexion (hors-ligne -> en ligne) : meme sequence.
   window.addEventListener('online', async () => {
     updateSyncBadge();
     await flushQueue();
