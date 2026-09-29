@@ -20,6 +20,7 @@
  *   POST   /api/completions                -> Create : body { date } -> marque la journee accomplie
  *   DELETE /api/completions/:date          -> Delete : annule la validation d'une journee
  *   PUT    /api/data                       -> Update : remplace l'etat complet (reset)
+ *   POST   /api/twisters/read              -> Create : body { date } -> lecture du virelangue du jour
  */
 
 const http = require('http');
@@ -81,7 +82,7 @@ function todayISO() {
 }
 
 function defaultData() {
-  return { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [], ideas: [] };
+  return { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [], ideas: [], twisters: {} };
 }
 
 function normalizePhrases(list) {
@@ -93,6 +94,16 @@ function normalizePhrases(list) {
       text: String(p.text || '').slice(0, 1000),
       reads: (p.reads && typeof p.reads === 'object') ? p.reads : {}
     }));
+}
+
+function normalizeTwisters(obj) {
+  const out = {};
+  if (!obj || typeof obj !== 'object') return out;
+  for (const k of Object.keys(obj)) {
+    const n = Math.round(Number(obj[k]) || 0);
+    if (DATE_RE.test(k) && n > 0) out[k] = n;
+  }
+  return out;
 }
 
 function normalizeIdeas(list) {
@@ -116,6 +127,7 @@ function readData() {
     if (!data.progress || typeof data.progress !== 'object') data.progress = {};
     data.phrases = normalizePhrases(data.phrases);
     data.ideas = normalizeIdeas(data.ideas);
+    data.twisters = normalizeTwisters(data.twisters);
     if (!data.startDate) data.startDate = todayISO();
     data.version = 2;
     return data;
@@ -311,7 +323,8 @@ async function handleApi(req, res, pathname) {
         : [],
       progress,
       phrases: normalizePhrases(body.phrases),
-      ideas: normalizeIdeas(body.ideas)
+      ideas: normalizeIdeas(body.ideas),
+      twisters: normalizeTwisters(body.twisters)
     };
     writeData(next);
     return sendJSON(res, 200, next);
@@ -358,6 +371,20 @@ async function handleApi(req, res, pathname) {
     const idx = data.phrases.findIndex((p) => p.id === id);
     if (idx === -1) return sendJSON(res, 404, { error: 'Phrase introuvable.' });
     data.phrases.splice(idx, 1);
+    writeData(data);
+    return sendJSON(res, 200, data);
+  }
+
+  // POST /api/twisters/read — lecture du virelangue du jour (body { date })
+  if (req.method === 'POST' && pathname === '/api/twisters/read') {
+    let body;
+    try { body = await readBody(req); }
+    catch (e) { return sendJSON(res, 400, { error: e.message }); }
+
+    const date = (body && body.date) || todayISO();
+    if (!DATE_RE.test(date)) return sendJSON(res, 400, { error: 'Date invalide.' });
+    const data = readData();
+    data.twisters[date] = (data.twisters[date] || 0) + 1;
     writeData(data);
     return sendJSON(res, 200, data);
   }

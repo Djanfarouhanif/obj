@@ -6,6 +6,7 @@ import { getStore } from '@netlify/blobs';
  *
  *   GET    /api/data                 -> Read   : etat complet
  *   PUT    /api/data                 -> Update : remplace l'etat (reset)
+ *   POST   /api/twisters/read        -> Create : { date } lecture du virelangue du jour
  *   POST   /api/progress             -> Create : { date, task } coche une tache
  *   DELETE /api/progress/:date/:task -> Delete : decoche une tache
  *   POST   /api/completions          -> Create : { date } journee accomplie
@@ -46,7 +47,7 @@ function todayISO() {
 }
 
 function defaultData() {
-  return { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [], ideas: [] };
+  return { version: 2, startDate: todayISO(), completions: [], progress: {}, phrases: [], ideas: [], twisters: {} };
 }
 
 function normalizePhrases(list) {
@@ -58,6 +59,16 @@ function normalizePhrases(list) {
       text: String(p.text || '').slice(0, 1000),
       reads: (p.reads && typeof p.reads === 'object') ? p.reads : {}
     }));
+}
+
+function normalizeTwisters(obj) {
+  const out = {};
+  if (!obj || typeof obj !== 'object') return out;
+  for (const k of Object.keys(obj)) {
+    const n = Math.round(Number(obj[k]) || 0);
+    if (DATE_RE.test(k) && n > 0) out[k] = n;
+  }
+  return out;
 }
 
 function normalizeIdeas(list) {
@@ -78,6 +89,7 @@ function normalize(d) {
   if (!d.progress || typeof d.progress !== 'object') d.progress = {};
   d.phrases = normalizePhrases(d.phrases);
   d.ideas = normalizeIdeas(d.ideas);
+  d.twisters = normalizeTwisters(d.twisters);
   if (!d.startDate) d.startDate = todayISO();
   d.version = 2;
   return d;
@@ -172,7 +184,8 @@ export default async (req) => {
           : [],
         progress,
         phrases: normalizePhrases(body.phrases),
-        ideas: normalizeIdeas(body.ideas)
+        ideas: normalizeIdeas(body.ideas),
+      twisters: normalizeTwisters(body.twisters)
       };
       await saveData(store, next);
       return json(200, next);
@@ -211,6 +224,16 @@ export default async (req) => {
       const idx = data.phrases.findIndex((p) => p.id === id);
       if (idx === -1) return json(404, { error: 'Phrase introuvable.' });
       data.phrases.splice(idx, 1);
+      await saveData(store, data);
+      return json(200, data);
+    }
+
+    // POST /api/twisters/read — lecture du virelangue du jour (body { date })
+    if (method === 'POST' && pathname === '/api/twisters/read') {
+      const date = (body && body.date) || todayISO();
+      if (!DATE_RE.test(date)) return json(400, { error: 'Date invalide.' });
+      const data = await loadData(store);
+      data.twisters[date] = (data.twisters[date] || 0) + 1;
       await saveData(store, data);
       return json(200, data);
     }
